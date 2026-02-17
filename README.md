@@ -19,7 +19,7 @@ Rec2Note/
 ├── notes/                  # Output notes
 │   └── .gitkeep
 └── src/
-    └── rec2note_cli/        # Main package
+    └── rec2note/           # Main package
         ├── __init__.py
         ├── main.py         # Entry point (Typer app definition)
         ├── config.py       # Configuration management (Pydantic Settings)
@@ -36,9 +36,9 @@ Rec2Note/
         │   ├── llm.py      # LLM API Client wrapper
         │   └── pipeline.py # Orchestrates Audio -> Text -> Notes
         │
-        ├── templates/      # LLM Assets
+        ├── prompts/        # LLM Assets
         │   ├── __init__.py
-        │   └── prompts.py  # System prompts and Jinja2 templates
+        │   └── [...].py    # System prompts
         │
         ├── ui/             # Presentation Layer (Rich)
         │   ├── __init__.py

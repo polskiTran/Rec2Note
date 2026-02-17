@@ -1,11 +1,20 @@
 [project]
 name = "rec2note"
 version = "0.1.0"
-description = "Add your description here"
+description = "CLI tool for transforming lecture recordings into markdown notes."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "google-genai>=1.63.0",
     "pydantic-settings>=2.13.0",
     "rich>=14.3.2",
     "typer>=0.24.0",
 ]
+
+[project.scripts]
+# This allows you to run 'rec2note' directly in the terminal
+rec2note = "rec2note_cli.main:app"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
