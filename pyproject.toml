@@ -1,0 +1,11 @@
+[project]
+name = "rec2note"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic-settings>=2.13.0",
+    "rich>=14.3.2",
+    "typer>=0.24.0",
+]
