@@ -2,14 +2,16 @@ from typing import Any
 
 from google import genai
 from google.genai import types
+from rich import print
 
 from rec2note_cli.config import get_settings
 from rec2note_cli.utils.read_file import read_file
 
+settings = get_settings()
+
 
 def _get_client() -> genai.Client:
     """Return an authenticated Gemini client."""
-    settings = get_settings()
     return genai.Client(api_key=settings.google_gemini_api_key)
 
 
@@ -17,7 +19,7 @@ def create_llm_cache(
     model_id: str,
     input_data: Any,
     sys_prompt: str | None = None,
-    ttl: str = "3600s",
+    ttl: str = settings.google_gemini_cache_ttl,
 ) -> str:
     """
     Upload ``input_data`` to a server-side Gemini context cache and return
@@ -55,12 +57,14 @@ def create_llm_cache(
         cache_config = cache_config.model_copy(
             update={"system_instruction": sys_prompt}
         )
+    else:
+        raise ValueError("System prompt is required")
 
     cache = client.caches.create(model=model_id, config=cache_config)
     return cache.name if cache.name else ""
 
 
-def summarize_usage(usage_metadata) -> dict:
+def summarize_usage(usage_metadata, cached_token_price: float = 0.00001) -> dict:
     """
     Generate a detailed summary dict highlighting cached token usage.
 
@@ -72,8 +76,19 @@ def summarize_usage(usage_metadata) -> dict:
         return getattr(usage_metadata, attr, None) or default
 
     total_tokens = _get("total_token_count")
+    prompt_tokens = _get("prompt_token_count")
     cached_tokens = _get("cached_content_token_count")
-    cached_pct = (cached_tokens / total_tokens * 100) if total_tokens > 0 else 0
+
+    # Calculate percentage against input (prompt) tokens, not total tokens
+    cached_pct = (cached_tokens / prompt_tokens * 100) if prompt_tokens > 0 else 0
+
+    # Determine dynamic recommendation
+    if cached_tokens > 0:
+        recommendation = "Cache hit detected. Monitor TTL to maximize savings."
+    else:
+        recommendation = (
+            "No cache hit. Consider context caching if this prompt is reused."
+        )
 
     summary = {
         "total_request_tokens": total_tokens,
@@ -84,8 +99,8 @@ def summarize_usage(usage_metadata) -> dict:
         ),
         "breakdown": {
             "input_tokens": {
-                "prompt": _get("prompt_token_count"),
-                "cached_content": cached_tokens,
+                "total_prompt": prompt_tokens,
+                "cached_portion": cached_tokens,
                 "tool_use_prompt": _get("tool_use_prompt_token_count"),
                 "thoughts": _get("thoughts_token_count"),
             },
@@ -95,8 +110,9 @@ def summarize_usage(usage_metadata) -> dict:
         },
         "cache_impact": {
             "tokens_saved": cached_tokens,
-            "cost_savings_estimate": f"~${cached_tokens * 0.0001:.4f}",
-            "recommendation": "Cache hit detected - consider increasing cache TTL for similar prompts",
+            # Parameterized the price to avoid brittle hardcoding
+            # "cost_savings_estimate": f"~${cached_tokens * cached_token_price:.4f}",
+            "recommendation": recommendation,
         },
     }
 
@@ -110,7 +126,7 @@ def call_llm(
     user_prompt: str | None = None,
     input_data: Any | None = None,
     cache_name: str | None = None,
-    output_summary: bool = False,
+    output_summary: bool = settings.output_summary,
 ) -> str:
     """
     Call a Google Gemini LLM model and return the response text.
@@ -204,10 +220,6 @@ def call_llm(
     if output_summary:
         print(summarize_usage(response.usage_metadata))
     return response_text
-
-
-def get_usage_summary(response):
-    return response.usage.total_tokens
 
 
 if __name__ == "__main__":

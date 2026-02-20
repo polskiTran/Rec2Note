@@ -1,29 +1,46 @@
 import json
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from google.genai import types
 
+from rec2note_cli.config import get_settings
 from rec2note_cli.core.llm import call_llm, create_llm_cache
+from rec2note_cli.core.models import (
+    Deadline,
+    KeyTerm,
+    LectureSummary,
+    LectureTopic,
+    StudentQA,
+    StudyQuestion,
+    VisualAidTimestamp,
+)
+from rec2note_cli.enums.agent_enums import AgentType
+
+settings = get_settings()
+
 
 # ---------------------------------------------------------------------------
 # Prompt loading
 # ---------------------------------------------------------------------------
 
-_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
+def _load_prompt(agentType: AgentType) -> str:
+    """
+    Read agent prompt from the prompts directory and return its texts.
 
-def _load_prompt(filename: str) -> str:
-    """Read a prompt file from the prompts directory and return its text."""
-    path = _PROMPTS_DIR / filename
+    Args:
+        agentType: The type of agent for which to load the prompt.
+
+    Returns:
+        The prompt text.
+    """
+    path = Path(settings.agent_instructions[agentType])
     return path.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-DEFAULT_MODEL = "gemini-2.5-flash"
 
 
 def _make_request_config(
@@ -59,7 +76,7 @@ def _require_key(data: dict, key: str, context: str = "response") -> list:
 def _build_cache(
     transcript: str | None,
     cache_name: str | None,
-    prompt_file: str,
+    agent_type: AgentType,
     model_id: str,
     ttl: str,
 ) -> str:
@@ -71,238 +88,7 @@ def _build_cache(
     return create_llm_cache(
         model_id=model_id,
         input_data=transcript,
-        sys_prompt=_load_prompt(prompt_file),
-        ttl=ttl,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Output types
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class VisualAidTimestamp:
-    """A moment in the transcript where a visual aid is likely needed."""
-
-    timestamp: str
-    reason: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
-class LectureTopic:
-    """A topic or section covered in the lecture."""
-
-    topic: str
-    details: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
-class KeyTerm:
-    """A key term or concept introduced in the lecture."""
-
-    term: str
-    definition: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
-class LectureSummary:
-    """Structured summary of a lecture transcript."""
-
-    title: str
-    overview: str
-    key_points: list[str]
-    topics: list[LectureTopic]
-    key_terms: list[KeyTerm]
-
-    def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "overview": self.overview,
-            "key_points": self.key_points,
-            "topics": [t.to_dict() for t in self.topics],
-            "key_terms": [k.to_dict() for k in self.key_terms],
-        }
-
-
-@dataclass
-class Deadline:
-    """A deadline or deliverable mentioned in the lecture."""
-
-    timestamp: str
-    description: str
-    due_date: str | None
-    type: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
-class StudyQuestion:
-    """A study question generated from the lecture content."""
-
-    question: str
-    type: str
-    answer: str
-    timestamp_reference: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
-class StudentQA:
-    """A genuine student question and the lecturer's answer."""
-
-    question_timestamp: str
-    question: str
-    answer_timestamp: str
-    answer: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-# ---------------------------------------------------------------------------
-# Cache helpers
-# ---------------------------------------------------------------------------
-
-
-def create_visual_aids_cache(
-    transcript: str,
-    model_id: str = DEFAULT_MODEL,
-    ttl: str = "3600s",
-) -> str:
-    """
-    Create a Gemini context cache for the visual aids agent.
-
-    The visual-aids system prompt is baked into the cache so that
-    ``system_instruction`` does not need to be sent with each request
-    (the Gemini API forbids this when ``cached_content`` is present).
-
-    Args:
-        transcript: Full transcript text (SRT-style or similar).
-        model_id:   Gemini model ID — must match the one used in
-                    :func:`visual_aids_agent`.
-        ttl:        Cache time-to-live, e.g. ``"3600s"``.
-
-    Returns:
-        Opaque cache name string to pass to :func:`visual_aids_agent`.
-    """
-    return create_llm_cache(
-        model_id=model_id,
-        input_data=transcript,
-        sys_prompt=_load_prompt("visual_aids_search.md"),
-        ttl=ttl,
-    )
-
-
-def create_summary_cache(
-    transcript: str,
-    model_id: str = DEFAULT_MODEL,
-    ttl: str = "3600s",
-) -> str:
-    """
-    Create a Gemini context cache for the summary agent.
-
-    Args:
-        transcript: Full transcript text.
-        model_id:   Gemini model ID — must match the one used in
-                    :func:`summary_agent`.
-        ttl:        Cache time-to-live, e.g. ``"3600s"``.
-
-    Returns:
-        Opaque cache name string to pass to :func:`summary_agent`.
-    """
-    return create_llm_cache(
-        model_id=model_id,
-        input_data=transcript,
-        sys_prompt=_load_prompt("summary.md"),
-        ttl=ttl,
-    )
-
-
-def create_deadline_cache(
-    transcript: str,
-    model_id: str = DEFAULT_MODEL,
-    ttl: str = "3600s",
-) -> str:
-    """
-    Create a Gemini context cache for the deadline agent.
-
-    Args:
-        transcript: Full transcript text.
-        model_id:   Gemini model ID — must match the one used in
-                    :func:`deadline_agent`.
-        ttl:        Cache time-to-live, e.g. ``"3600s"``.
-
-    Returns:
-        Opaque cache name string to pass to :func:`deadline_agent`.
-    """
-    return create_llm_cache(
-        model_id=model_id,
-        input_data=transcript,
-        sys_prompt=_load_prompt("deadline.md"),
-        ttl=ttl,
-    )
-
-
-def create_questions_cache(
-    transcript: str,
-    model_id: str = DEFAULT_MODEL,
-    ttl: str = "3600s",
-) -> str:
-    """
-    Create a Gemini context cache for the questions agent.
-
-    Args:
-        transcript: Full transcript text.
-        model_id:   Gemini model ID — must match the one used in
-                    :func:`questions_agent`.
-        ttl:        Cache time-to-live, e.g. ``"3600s"``.
-
-    Returns:
-        Opaque cache name string to pass to :func:`questions_agent`.
-    """
-    return create_llm_cache(
-        model_id=model_id,
-        input_data=transcript,
-        sys_prompt=_load_prompt("questions.md"),
-        ttl=ttl,
-    )
-
-
-def create_student_qa_cache(
-    transcript: str,
-    model_id: str = DEFAULT_MODEL,
-    ttl: str = "3600s",
-) -> str:
-    """
-    Create a Gemini context cache for the student Q&A agent.
-
-    Args:
-        transcript: Full transcript text.
-        model_id:   Gemini model ID — must match the one used in
-                    :func:`student_qa_agent`.
-        ttl:        Cache time-to-live, e.g. ``"3600s"``.
-
-    Returns:
-        Opaque cache name string to pass to :func:`student_qa_agent`.
-    """
-    return create_llm_cache(
-        model_id=model_id,
-        input_data=transcript,
-        sys_prompt=_load_prompt("student_qa.md"),
+        sys_prompt=_load_prompt(agent_type),
         ttl=ttl,
     )
 
@@ -315,8 +101,8 @@ def create_student_qa_cache(
 def visual_aids_agent(
     transcript: str | None = None,
     cache_name: str | None = None,
-    model_id: str = DEFAULT_MODEL,
-    ttl: str = "3600s",
+    model_id: str = settings.google_gemini_model_id,
+    ttl: str = settings.google_gemini_cache_ttl,
     config: types.GenerateContentConfig | None = None,
 ) -> list[VisualAidTimestamp]:
     """
@@ -340,7 +126,7 @@ def visual_aids_agent(
                     the model response cannot be parsed.
     """
     resolved = _build_cache(
-        transcript, cache_name, "visual_aids_search.md", model_id, ttl
+        transcript, cache_name, AgentType.VISUAL_AIDS_SEARCH, model_id, ttl
     )
     raw = call_llm(
         model_id=model_id,
@@ -357,7 +143,7 @@ def visual_aids_agent(
 def summary_agent(
     transcript: str | None = None,
     cache_name: str | None = None,
-    model_id: str = DEFAULT_MODEL,
+    model_id: str = settings.google_gemini_model_id,
     ttl: str = "3600s",
     config: types.GenerateContentConfig | None = None,
 ) -> LectureSummary:
@@ -382,7 +168,7 @@ def summary_agent(
         ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
                     the model response cannot be parsed.
     """
-    resolved = _build_cache(transcript, cache_name, "summary.md", model_id, ttl)
+    resolved = _build_cache(transcript, cache_name, AgentType.SUMMARY, model_id, ttl)
     raw = call_llm(
         model_id=model_id,
         config=_make_request_config(config),
@@ -398,7 +184,7 @@ def summary_agent(
 def deadline_agent(
     transcript: str | None = None,
     cache_name: str | None = None,
-    model_id: str = DEFAULT_MODEL,
+    model_id: str = settings.google_gemini_model_id,
     ttl: str = "3600s",
     config: types.GenerateContentConfig | None = None,
 ) -> list[Deadline]:
@@ -422,7 +208,7 @@ def deadline_agent(
         ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
                     the model response cannot be parsed.
     """
-    resolved = _build_cache(transcript, cache_name, "deadline.md", model_id, ttl)
+    resolved = _build_cache(transcript, cache_name, AgentType.DEADLINE, model_id, ttl)
     raw = call_llm(
         model_id=model_id,
         config=_make_request_config(config),
@@ -439,7 +225,7 @@ def deadline_agent(
 def questions_agent(
     transcript: str | None = None,
     cache_name: str | None = None,
-    model_id: str = DEFAULT_MODEL,
+    model_id: str = settings.google_gemini_model_id,
     ttl: str = "3600s",
     config: types.GenerateContentConfig | None = None,
 ) -> list[StudyQuestion]:
@@ -463,7 +249,7 @@ def questions_agent(
         ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
                     the model response cannot be parsed.
     """
-    resolved = _build_cache(transcript, cache_name, "questions.md", model_id, ttl)
+    resolved = _build_cache(transcript, cache_name, AgentType.QUESTIONS, model_id, ttl)
     raw = call_llm(
         model_id=model_id,
         config=_make_request_config(config),
@@ -480,7 +266,7 @@ def questions_agent(
 def student_qa_agent(
     transcript: str | None = None,
     cache_name: str | None = None,
-    model_id: str = DEFAULT_MODEL,
+    model_id: str = settings.google_gemini_model_id,
     ttl: str = "3600s",
     config: types.GenerateContentConfig | None = None,
 ) -> list[StudentQA]:
@@ -510,7 +296,7 @@ def student_qa_agent(
         ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
                     the model response cannot be parsed.
     """
-    resolved = _build_cache(transcript, cache_name, "student_qa.md", model_id, ttl)
+    resolved = _build_cache(transcript, cache_name, AgentType.STUDENT_QA, model_id, ttl)
     raw = call_llm(
         model_id=model_id,
         config=_make_request_config(config),
@@ -541,7 +327,9 @@ def _parse_visual_aids_response(raw: str) -> list[VisualAidTimestamp]:
             raise ValueError(
                 f"Entry {i} is missing 'timestamp' or 'reason' fields: {entry}"
             )
-        results.append(VisualAidTimestamp(entry["timestamp"], entry["reason"]))
+        results.append(
+            VisualAidTimestamp(timestamp=entry["timestamp"], reason=entry["reason"])
+        )
     return results
 
 
@@ -553,8 +341,12 @@ def _parse_summary_response(raw: str) -> LectureSummary:
                 f"summary_agent response missing required key '{key}'. "
                 f"Keys present: {list(data.keys())}"
             )
-    topics = [LectureTopic(t["topic"], t["details"]) for t in data["topics"]]
-    key_terms = [KeyTerm(k["term"], k["definition"]) for k in data["key_terms"]]
+    topics = [
+        LectureTopic(topic=t["topic"], details=t["details"]) for t in data["topics"]
+    ]
+    key_terms = [
+        KeyTerm(term=k["term"], definition=k["definition"]) for k in data["key_terms"]
+    ]
     return LectureSummary(
         title=data["title"],
         overview=data["overview"],
