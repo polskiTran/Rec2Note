@@ -1,8 +1,14 @@
+# MacOS
+.DS_Store
+
 # local recordings and notes
 notes/*
 !notes/.gitkeep
 recordings/*
 !recordings/.gitkeep
+
+# SQLite DB
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -80,3 +80,16 @@ class StudentQA(BaseModel):
 
     def to_dict(self) -> dict:
         return self.model_dump()
+
+
+class LectureNoteResult(BaseModel):
+    """Aggregate of all agent outputs for one processed lecture."""
+
+    name: str
+    media_path: str
+    transcription_path: str | None
+    summary: LectureSummary
+    deadlines: list[Deadline]
+    study_questions: list[StudyQuestion]
+    student_qa: list[StudentQA]
+    visual_aids: list[VisualAidTimestamp]
