@@ -9,7 +9,6 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.0",
     "rich>=14.3.2",
-    "streamlit>=1.40.0",
     "typer>=0.24.0",
 ]
 
@@ -20,3 +19,8 @@ rec2note = "rec2note_cli.main:app"
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

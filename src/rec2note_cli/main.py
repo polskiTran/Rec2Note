@@ -1,25 +1,18 @@
 # src/rec2note_cli/main.py
 import typer
-from rec2note_cli.cli import process
-from rec2note_cli.ui.console import console
 
-# The main application
+from rec2note_cli.cli.process import process_run
+
+# Single-command app — Typer auto-promotes the sole command to the root,
+# so the user types  `rec2note [OPTIONS]`  with no subcommand name at all.
 app = typer.Typer(
     name="rec2note",
-    help="Rec2Note transforms lecture recording into markdown notes.",
-    no_args_is_help=True
+    help="Rec2Note — transform lecture recordings into beautiful markdown notes.",
+    no_args_is_help=True,
+    add_completion=False,
 )
 
-# Register the sub-commands
-app.add_typer(process.app, name="process")
-
-@app.callback()
-def main_callback(verbose: bool = False):
-    """
-    Global flags like --verbose can be handled here.
-    """
-    if verbose:
-        console.print("[info]Verbose mode enabled[/info]")
+app.command(name="rec2note")(process_run)
 
 if __name__ == "__main__":
     app()
