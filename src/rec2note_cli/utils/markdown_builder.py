@@ -35,7 +35,7 @@ def build_markdown(
     if student_qa:
         markdown += "## Student Questions\n"
         for question in student_qa:
-            markdown += f"- Q:{question.question}\n"
+            markdown += f"- Q: ({question.question_timestamp}) {question.question}\n"
             markdown += f"    - A: {question.answer}\n\n"
     # Deadline
     if deadline:
