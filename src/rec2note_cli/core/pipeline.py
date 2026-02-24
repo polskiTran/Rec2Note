@@ -176,10 +176,10 @@ def run_full_pipeline(note_name: str, transcription_path: str) -> str:
             if isinstance(result, Exception):
                 raise RuntimeError(f"{agent_names[i]} failed: {result}")
 
-        summary: LectureSummary = results[0]  # type: ignore[assignment]
-        deadlines: list[Deadline] = results[1]  # type: ignore[assignment]
-        study_questions: list[StudyQuestion] = results[2]  # type: ignore[assignment]
-        student_qa: list[StudentQA] = results[3]  # type: ignore[assignment]
+        summary: LectureSummary = results[0]
+        deadlines: list[Deadline] = results[1]
+        study_questions: list[StudyQuestion] = results[2]
+        student_qa: list[StudentQA] = results[3]
 
         return summary, deadlines, study_questions, student_qa
 
