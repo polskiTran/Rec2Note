@@ -3,6 +3,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 from rich import print
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from rec2note_cli.config import get_settings
 from rec2note_cli.utils.read_file import read_file
@@ -15,33 +16,24 @@ def _get_client() -> genai.Client:
     return genai.Client(api_key=settings.google_gemini_api_key)
 
 
-def create_llm_cache(
+def create_transcript_cache(
     model_id: str,
-    input_data: Any,
-    sys_prompt: str | None = None,
+    transcript: str,
     ttl: str = settings.google_gemini_cache_ttl,
 ) -> str:
     """
-    Upload ``input_data`` to a server-side Gemini context cache and return
-    the cache name.
+    Create an explicit cache for the transcript content.
 
-    The returned name should be stored by the caller and passed as
-    ``cache_name`` to :func:`call_llm` for every subsequent request that
-    should benefit from the cached context.  Google charges a reduced token
-    rate for cache hits, so creating the cache once and reusing the name
-    across many calls is what actually saves cost.
+    This cache can be reused across all 4 agents to avoid sending the
+    large transcript multiple times to the API.
 
     Args:
         model_id:   The model that will consume this cache, e.g.
                     ``"gemini-2.5-flash"``.  Must match the model used in
                     ``call_llm``.
-        input_data: The large context to cache (str, bytes, Part, uploaded
-                    File reference, or any other genai-compatible type).
-        sys_prompt: Optional system instruction to bake into the cache.  When
-                    the cache is used in ``call_llm`` the system prompt must
-                    NOT be passed again — it is already present in the cache.
+        transcript: The transcript text to cache.
         ttl:        How long the cache should live on Google's servers, e.g.
-                    ``"300s"`` or ``"3600s"``.  Defaults to one hour.
+                    ``"300s"`` or ``"3600s"``.  Defaults to config settings.
 
     Returns:
         The opaque cache name string (e.g. ``"cachedContents/abc123"``).
@@ -50,18 +42,62 @@ def create_llm_cache(
     client = _get_client()
 
     cache_config = types.CreateCachedContentConfig(
-        contents=[input_data],
+        contents=[transcript],
         ttl=ttl,
     )
-    if sys_prompt:
-        cache_config = cache_config.model_copy(
-            update={"system_instruction": sys_prompt}
-        )
-    else:
-        raise ValueError("System prompt is required")
 
     cache = client.caches.create(model=model_id, config=cache_config)
     return cache.name if cache.name else ""
+
+
+# def create_llm_cache(
+#     model_id: str,
+#     input_data: Any,
+#     sys_prompt: str | None = None,
+#     ttl: str = settings.google_gemini_cache_ttl,
+# ) -> str:
+#     """
+#     Upload ``input_data`` to a server-side Gemini context cache and return
+#     the cache name.
+
+#     The returned name should be stored by the caller and passed as
+#     ``cache_name`` to :func:`call_llm` for every subsequent request that
+#     should benefit from the cached context.  Google charges a reduced token
+#     rate for cache hits, so creating the cache once and reusing the name
+#     across many calls is what actually saves cost.
+
+#     Args:
+#         model_id:   The model that will consume this cache, e.g.
+#                     ``"gemini-2.5-flash"``.  Must match the model used in
+#                     ``call_llm``.
+#         input_data: The large context to cache (str, bytes, Part, uploaded
+#                     File reference, or any other genai-compatible type).
+#         sys_prompt: Optional system instruction to bake into the cache.  When
+#                     the cache is used in ``call_llm`` the system prompt must
+#                     NOT be passed again — it is already present in the cache.
+#         ttl:        How long the cache should live on Google's servers, e.g.
+#                     ``"300s"`` or ``"3600s"``.  Defaults to one hour.
+
+#     Returns:
+#         The opaque cache name string (e.g. ``"cachedContents/abc123"``).
+#         Pass this value to ``call_llm`` via ``cache_name``.
+#     """
+#     client = _get_client()
+
+#     cache_config = types.CreateCachedContentConfig(
+#         contents=[input_data],
+#         ttl=ttl,
+#     )
+#     if sys_prompt:
+#         cache_config = cache_config.model_copy(
+#             update={"system_instruction": sys_prompt}
+#         )
+#         print(f"\n(!) cache created {sys_prompt[:50]}\n")
+#     else:
+#         raise ValueError("System prompt is required")
+
+#     cache = client.caches.create(model=model_id, config=cache_config)
+#     return cache.name if cache.name else ""
 
 
 def summarize_usage(usage_metadata, cached_token_price: float = 0.00001) -> dict:
@@ -119,6 +155,11 @@ def summarize_usage(usage_metadata, cached_token_price: float = 0.00001) -> dict
     return summary
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    reraise=True,
+)
 def call_llm(
     model_id: str,
     config: types.GenerateContentConfig | None = None,
@@ -239,10 +280,9 @@ if __name__ == "__main__":
     # Step 1: create the cache once (e.g. at the start of a session).
     try:
         large_context = read_file("recordings/lecture1/Lecture5_020526.srt")
-        cache_name = create_llm_cache(
+        cache_name = create_transcript_cache(
             model_id=settings.google_gemini_model_id,
-            input_data=large_context,
-            sys_prompt="You are an expert at analysing transcripts.",
+            transcript=large_context,
             ttl=settings.google_gemini_cache_ttl,
         )
         print("Cache created:", cache_name)

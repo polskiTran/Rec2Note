@@ -41,7 +41,7 @@ def build_markdown(
     if deadline:
         markdown += "## Deadline\n"
         for deadline_item in deadline:
-            markdown += f"- ({deadline_item.timestamp}) [{deadline_item.type}] {deadline_item.description}: ({deadline_item.due_date if deadline_item.due_date else 'N/A'})\n"
+            markdown += f"- ({deadline_item.timestamp}) [{deadline_item.type}] {deadline_item.description} ({deadline_item.due_date if deadline_item.due_date else 'N/A'})\n"
 
     # Study Questions
     if study_qs:

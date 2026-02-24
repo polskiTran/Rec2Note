@@ -1,6 +1,11 @@
+import asyncio
+from collections.abc import Callable
+from functools import partial
+
 from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.rule import Rule
 
 from rec2note_cli.config import get_settings
@@ -10,6 +15,8 @@ from rec2note_cli.core.agents import (
     student_qa_agent,
     summary_agent,
 )
+from rec2note_cli.core.llm import create_transcript_cache
+from rec2note_cli.core.models import Deadline, LectureSummary, StudentQA, StudyQuestion
 from rec2note_cli.utils.markdown_builder import build_markdown
 from rec2note_cli.utils.read_file import read_file
 
@@ -17,6 +24,20 @@ console = Console()
 settings = get_settings()
 
 _PANEL_WIDTH = 106
+
+
+async def _run_agent_with_semaphore(
+    semaphore: asyncio.Semaphore,
+    agent_func: Callable[
+        ..., LectureSummary | list[Deadline] | list[StudentQA] | list[StudyQuestion]
+    ],
+    cache_name: str,
+) -> LectureSummary | list[Deadline] | list[StudentQA] | list[StudyQuestion]:
+    async with semaphore:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, partial(agent_func, cache_name=cache_name)
+        )
 
 
 def run_minimal_pipeline(note_name: str, transcription_path: str) -> str:
@@ -54,11 +75,16 @@ def run_minimal_pipeline(note_name: str, transcription_path: str) -> str:
         f"[dim]({len(transcript):,} characters)[/dim]"
     )
 
-    ttl = settings.google_gemini_cache_ttl
+    console.print("\n[bold cyan]📦 Creating transcript cache...[/bold cyan]")
+    cache_name = create_transcript_cache(
+        model_id=settings.google_gemini_model_id,
+        transcript=transcript,
+    )
+    console.print(f"[green]✓[/green] Cache created: [dim]{cache_name}[/dim]")
 
     console.print()
     with console.status("[yellow]🤖 Running summary agent...[/yellow]", spinner="dots"):
-        summary = summary_agent(transcript=transcript, ttl=ttl)
+        summary = summary_agent(cache_name=cache_name)
     console.print("[green]✓[/green] [bold]Summary[/bold] complete.")
 
     console.print()
@@ -95,6 +121,7 @@ def run_full_pipeline(note_name: str, transcription_path: str) -> str:
     )
     console.print(Align.center(job_panel))
 
+    # reading transcript and build transcript cache
     console.print("\n[bold cyan]📄 Reading transcript...[/bold cyan]")
     transcript = read_file(transcription_path)
     if not transcript.strip():
@@ -104,44 +131,80 @@ def run_full_pipeline(note_name: str, transcription_path: str) -> str:
         f"[dim]({len(transcript):,} characters)[/dim]"
     )
 
-    ttl = settings.google_gemini_cache_ttl
+    console.print("\n[bold cyan]📦 Creating transcript cache...[/bold cyan]")
+    cache_name = create_transcript_cache(
+        model_id=settings.google_gemini_model_id,
+        transcript=transcript,
+    )
+    console.print(f"[green]✓[/green] Cache created: [dim]{cache_name}[/dim]")
 
-    agents = [
-        ("🤖 Running summary agent...", "Summary"),
-        ("📅 Running deadline agent...", "Deadlines"),
-        ("📚 Running study questions agent...", "Study questions"),
-        ("🙋 Running student Q&A agent...", "Student Q&A"),
-    ]
-    total = len(agents)
+    # call agents concurrently
+    async def run_agents_with_progress(progress: Progress, tasks: dict):
+        semaphore = asyncio.Semaphore(3)
+
+        async def run_and_update(agent_func, task_key, agent_name):
+            progress.update(
+                tasks[task_key], description=f"[yellow]⏳ {agent_name}", completed=0
+            )
+            try:
+                result = await _run_agent_with_semaphore(
+                    semaphore, agent_func, cache_name
+                )
+                progress.update(
+                    tasks[task_key],
+                    completed=1,
+                    description=f"[green]✓ {agent_name}",
+                )
+                return result
+            except Exception:
+                progress.update(
+                    tasks[task_key],
+                    description=f"[red]✗ {agent_name} failed",
+                )
+                raise
+
+        results = await asyncio.gather(
+            run_and_update(summary_agent, "summary", "Summary"),
+            run_and_update(deadline_agent, "deadlines", "Deadlines"),
+            run_and_update(questions_agent, "questions", "Study Questions"),
+            run_and_update(student_qa_agent, "student_qa", "Student Q&A"),
+            return_exceptions=True,
+        )
+
+        agent_names = ["Summary", "Deadlines", "Study Questions", "Student Q&A"]
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                raise RuntimeError(f"{agent_names[i]} failed: {result}")
+
+        summary: LectureSummary = results[0]  # type: ignore[assignment]
+        deadlines: list[Deadline] = results[1]  # type: ignore[assignment]
+        study_questions: list[StudyQuestion] = results[2]  # type: ignore[assignment]
+        student_qa: list[StudentQA] = results[3]  # type: ignore[assignment]
+
+        return summary, deadlines, study_questions, student_qa
 
     console.print()
 
-    with console.status(f"[yellow]{agents[0][0]}[/yellow]", spinner="dots") as status:
-        summary = summary_agent(transcript=transcript, ttl=ttl)
-        console.print(
-            f"[green]✓[/green] [bold]{agents[0][1]}[/bold] complete. [dim](1/{total})[/dim]"
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold]{task.description}"),
+        BarColumn(),
+        console=console,
+    ) as progress:
+        tasks = {
+            "summary": progress.add_task("[cyan]Summary Agent", total=1),
+            "deadlines": progress.add_task("[cyan]Deadline Agent", total=1),
+            "questions": progress.add_task("[cyan]Study Questions Agent", total=1),
+            "student_qa": progress.add_task("[cyan]Student Q&A Agent", total=1),
+        }
+
+        summary, deadlines, study_questions, student_qa = asyncio.run(
+            run_agents_with_progress(progress, tasks)
         )
 
-        status.update(f"[yellow]{agents[1][0]}[/yellow]")
-        deadlines = deadline_agent(transcript=transcript, ttl=ttl)
-        console.print(
-            f"[green]✓[/green] [bold]{agents[1][1]}[/bold] complete. [dim](2/{total})[/dim]"
-        )
-
-        status.update(f"[yellow]{agents[2][0]}[/yellow]")
-        study_questions = questions_agent(transcript=transcript, ttl=ttl)
-        console.print(
-            f"[green]✓[/green] [bold]{agents[2][1]}[/bold] complete. [dim](3/{total})[/dim]"
-        )
-
-        status.update(f"[yellow]{agents[3][0]}[/yellow]")
-        student_qa = student_qa_agent(transcript=transcript, ttl=ttl)
-        console.print(
-            f"[green]✓[/green] [bold]{agents[3][1]}[/bold] complete. [dim](4/{total})[/dim]"
-        )
+    console.print("[green]✓[/green] All agents complete.")
 
     console.print()
-
     result_panel = Panel(
         f"[green]✓[/green] Summary\n"
         f"[green]✓[/green] {len(deadlines)} deadline(s) found\n"

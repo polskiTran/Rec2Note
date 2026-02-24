@@ -23,9 +23,9 @@ You will receive:
 
 2. For each genuine student question found:
    - Record the timestamp where the question was asked
-   - Capture the full text of the student's question and rephrase, fix miss-transcript so that the question make sense with the context of the lecture.
+   - Interpret the student question and paraphrase the question so that the question is complete and its own.
    - Record the timestamp where the lecturer begins their answer
-   - Capture the full text of the lecturer's answer (include all of it, even if it spans multiple transcript segments)
+   - Interpret the lecturer answer, paraphrase it so that a complete a comprehend answer is presented. Also present the answer implications.
 
 3. Indicators that a question comes from a student (not the lecturer):
    - A change in speaker is implied (e.g. "Yes, go ahead", "Good question", "That's a great point")
@@ -48,9 +48,9 @@ Your output MUST be structured JSON.
   "student_questions": [
     {
       "question_timestamp": "HH:MM:SS",
-      "question": "The full text of the student's question.",
+      "question": "The student question.",
       "answer_timestamp": "HH:MM:SS",
-      "answer": "The full text of the lecturer's response to the question."
+      "answer": "The lecturer answer."
     }
   ]
 }
@@ -61,5 +61,5 @@ Your output MUST be structured JSON.
 - `question_timestamp` and `answer_timestamp` must be in `HH:MM:SS` format (no milliseconds).
 - If no student questions are found, return `{"student_questions": []}`.
 - Do NOT include rhetorical or self-posed lecturer questions.
-- Preserve the original wording of both the question and answer as closely as possible.
+- Transcript can contain miss transcript words so use the context of the lecture as a guidance if some words dont make sense in current context.
 </RULES>
