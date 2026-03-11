@@ -7,7 +7,7 @@ from rec2note_cli.cli.process import process_run
 # so the user types  `rec2note [OPTIONS]`  with no subcommand name at all.
 app = typer.Typer(
     name="rec2note",
-    help="Rec2Note — transform lecture recordings into beautiful markdown notes.",
+    help="Rec2Note — transform lecture recordings into markdown notes.",
     no_args_is_help=True,
     add_completion=False,
 )

@@ -33,7 +33,7 @@ _LOGO = (
     r"[bold cyan]|_| \_\_____\____|_____|_| \_|\___/ |_| |_____|[/bold cyan]"
 )
 
-_TAGLINE = "[dim]Transform lecture recordings into beautiful markdown notes.[/dim]"
+_TAGLINE = "[dim]Transform lecture recordings into markdown notes.[/dim]"
 
 _NOTES_DIR = Path("notes")
 
