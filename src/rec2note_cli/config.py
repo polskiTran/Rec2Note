@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     current_date: str = datetime.now().strftime("%Y-%m-%d")
 
     # debugging
-    output_summary: bool = True
+    output_summary: bool = False
 
 
 @lru_cache
