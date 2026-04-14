@@ -1,10 +1,8 @@
 import json
 from pathlib import Path
 
-from google.genai import types
-
 from rec2note_cli.config import get_settings
-from rec2note_cli.core.llm import call_llm, create_transcript_cache
+from rec2note_cli.core.llm import call_llm
 from rec2note_cli.core.models import (
     Deadline,
     KeyTerm,
@@ -24,35 +22,23 @@ settings = get_settings()
 # ---------------------------------------------------------------------------
 
 
-def _load_prompt(agentType: AgentType) -> str:
+def _load_prompt(agent_type: AgentType) -> str:
     """
-    Read agent prompt from the prompts directory and return its texts.
+    Read agent prompt from the prompts directory and return its text.
 
     Args:
-        agentType: The type of agent for which to load the prompt.
+        agent_type: The type of agent for which to load the prompt.
 
     Returns:
         The prompt text.
     """
-    path = Path(settings.agent_instructions[agentType])
+    path = Path(settings.agent_instructions[agent_type])
     return path.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_request_config(
-    config: types.GenerateContentConfig | None,
-) -> types.GenerateContentConfig:
-    """Return a config with ``response_mime_type`` forced to JSON.
-
-    ``system_instruction`` must NOT be set here — it lives inside the cache.
-    """
-    if config is None:
-        return types.GenerateContentConfig(response_mime_type="application/json")
-    return config.model_copy(update={"response_mime_type": "application/json"})
 
 
 def _parse_json(raw: str, context: str = "agent") -> dict:
@@ -79,149 +65,97 @@ def _require_key(data: dict, key: str, context: str = "response") -> list:
 
 
 def visual_aids_agent(
-    cache_name: str,
-    model_id: str = settings.google_gemini_model_id,
-    ttl: str = settings.google_gemini_cache_ttl,
-    config: types.GenerateContentConfig | None = None,
+    transcript: str,
+    model_id: str | None = None,
 ) -> list[VisualAidTimestamp]:
     """
     Identify timestamps where visual aids are needed for comprehension.
 
     Args:
-        cache_name:  Pre-built cache from :func:`create_visual_aids_cache`.
-                     When supplied, ``transcript`` and ``ttl`` are ignored.
-        model_id:    Gemini model identifier.
-        ttl:         Cache TTL used when creating a new cache.
-        config:      Optional generation config.  ``system_instruction`` and
-                     ``response_mime_type`` are managed automatically.
+        transcript: The full lecture transcript text.
+        model_id: Override the default model from settings.
 
     Returns:
         List of :class:`VisualAidTimestamp` objects.
 
     Raises:
-        ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
-                    the model response cannot be parsed.
+        ValueError: If the model response cannot be parsed.
     """
-    raw = call_llm(
-        model_id=model_id,
-        config=_make_request_config(config),
-        user_prompt=(
-            "Analyse the cached transcript and return all timestamps where "
-            "visual context is needed, following the JSON schema exactly. "
-        ),
-        cache_name=cache_name,
-    )
+    prompt = _load_prompt(AgentType.VISUAL_AIDS_SEARCH)
+    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
     return _parse_visual_aids_response(raw)
 
 
 def summary_agent(
-    cache_name: str,
-    model_id: str = settings.google_gemini_model_id,
-    ttl: str = "3600s",
-    config: types.GenerateContentConfig | None = None,
+    transcript: str,
+    model_id: str | None = None,
 ) -> LectureSummary:
     """
     Produce a structured summary of a lecture transcript.
 
     Args:
-        cache_name:  Pre-built cache from :func:`create_summary_cache`.
-                     When supplied, ``transcript`` and ``ttl`` are ignored.
-        model_id:    Gemini model identifier.
-        ttl:         Cache TTL used when creating a new cache.
-        config:      Optional generation config.  ``system_instruction`` and
-                     ``response_mime_type`` are managed automatically.
+        transcript: The full lecture transcript text.
+        model_id: Override the default model from settings.
 
     Returns:
         A :class:`LectureSummary` with title, overview, key points, topics,
         and key terms.
 
     Raises:
-        ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
-                    the model response cannot be parsed.
+        ValueError: If the model response cannot be parsed.
     """
-    summary_agent_prompt = _load_prompt(AgentType.SUMMARY)
-    raw = call_llm(
-        model_id=model_id,
-        config=_make_request_config(config),
-        user_prompt=summary_agent_prompt,
-        cache_name=cache_name,
-    )
+    prompt = _load_prompt(AgentType.SUMMARY)
+    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
     return _parse_summary_response(raw)
 
 
 def deadline_agent(
-    cache_name: str,
-    model_id: str = settings.google_gemini_model_id,
-    ttl: str = "3600s",
-    config: types.GenerateContentConfig | None = None,
+    transcript: str,
+    model_id: str | None = None,
 ) -> list[Deadline]:
     """
     Extract all deadlines and deliverables from a lecture transcript.
 
     Args:
-        cache_name:  Pre-built cache from :func:`create_deadline_cache`.
-                     When supplied, ``transcript`` and ``ttl`` are ignored.
-        model_id:    Gemini model identifier.
-        ttl:         Cache TTL used when creating a new cache.
-        config:      Optional generation config.  ``system_instruction`` and
-                     ``response_mime_type`` are managed automatically.
+        transcript: The full lecture transcript text.
+        model_id: Override the default model from settings.
 
     Returns:
         List of :class:`Deadline` objects.
 
     Raises:
-        ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
-                    the model response cannot be parsed.
+        ValueError: If the model response cannot be parsed.
     """
-    deadline_agent_prompt = _load_prompt(AgentType.DEADLINE)
-    raw = call_llm(
-        model_id=model_id,
-        config=_make_request_config(config),
-        user_prompt=deadline_agent_prompt,
-        cache_name=cache_name,
-    )
+    prompt = _load_prompt(AgentType.DEADLINE)
+    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
     return _parse_deadline_response(raw)
 
 
 def questions_agent(
-    cache_name: str | None = None,
-    model_id: str = settings.google_gemini_model_id,
-    ttl: str = "3600s",
-    config: types.GenerateContentConfig | None = None,
+    transcript: str,
+    model_id: str | None = None,
 ) -> list[StudyQuestion]:
     """
     Generate study questions from a lecture transcript.
 
     Args:
-        cache_name:  Pre-built cache from :func:`create_questions_cache`.
-                     When supplied, ``transcript`` and ``ttl`` are ignored.
-        model_id:    Gemini model identifier.
-        ttl:         Cache TTL used when creating a new cache.
-        config:      Optional generation config.  ``system_instruction`` and
-                     ``response_mime_type`` are managed automatically.
+        transcript: The full lecture transcript text.
+        model_id: Override the default model from settings.
 
     Returns:
         List of :class:`StudyQuestion` objects.
 
     Raises:
-        ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
-                    the model response cannot be parsed.
+        ValueError: If the model response cannot be parsed.
     """
-    question_agent_prompt = _load_prompt(AgentType.QUESTIONS)
-    raw = call_llm(
-        model_id=model_id,
-        config=_make_request_config(config),
-        user_prompt=question_agent_prompt,
-        cache_name=cache_name,
-    )
+    prompt = _load_prompt(AgentType.QUESTIONS)
+    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
     return _parse_questions_response(raw)
 
 
 def student_qa_agent(
-    cache_name: str,
-    model_id: str = settings.google_gemini_model_id,
-    ttl: str = "3600s",
-    config: types.GenerateContentConfig | None = None,
+    transcript: str,
+    model_id: str | None = None,
 ) -> list[StudentQA]:
     """
     Extract genuine student questions and lecturer answers from a transcript.
@@ -231,29 +165,18 @@ def student_qa_agent(
     excluded.  If no student questions are found, an empty list is returned.
 
     Args:
-        cache_name:  Pre-built cache from :func:`create_student_qa_cache`.
-                     When supplied, ``transcript`` and ``ttl`` are ignored.
-        model_id:    Gemini model identifier.
-        ttl:         Cache TTL used when creating a new cache.
-        config:      Optional generation config.  ``system_instruction`` and
-                     ``response_mime_type`` are managed automatically.
+        transcript: The full lecture transcript text.
+        model_id: Override the default model from settings.
 
     Returns:
-        List of :class:`StudentQA` objects, each with ``question_timestamp``,
-        ``question``, ``answer_timestamp``, and ``answer``.  Returns an empty
-        list when no student questions are present in the transcript.
+        List of :class:`StudentQA` objects.  Returns an empty list when no
+        student questions are present in the transcript.
 
     Raises:
-        ValueError: If neither ``transcript`` nor ``cache_name`` is given, or
-                    the model response cannot be parsed.
+        ValueError: If the model response cannot be parsed.
     """
-    student_qa_agent_prompt = _load_prompt(AgentType.STUDENT_QA)
-    raw = call_llm(
-        model_id=model_id,
-        config=_make_request_config(config),
-        user_prompt=student_qa_agent_prompt,
-        cache_name=cache_name,
-    )
+    prompt = _load_prompt(AgentType.STUDENT_QA)
+    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
     return _parse_student_qa_response(raw)
 
 
@@ -366,36 +289,19 @@ def _parse_student_qa_response(raw: str) -> list[StudentQA]:
 
 
 # ---------------------------------------------------------------------------
-# Quick smoke-test
+# Smoke-test
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    from typing import List
-
-    from rich import print
-
     from rec2note_cli.utils.read_file import read_file
 
-    # load transcript
     try:
-        large_context = read_file("recordings/lecture1/Lecture5_020526.srt")
-        cache_name = create_transcript_cache(
-            model_id=settings.google_gemini_model_id,
-            transcript=large_context,
-            ttl=settings.google_gemini_cache_ttl,
-        )
-        print("Cache created:", cache_name)
-    except Exception as e:
-        print(f"Error creating cache: {e}")
+        transcript = read_file("recordings/lecture1/Lecture5_020526.srt")
+    except Exception:
+        transcript = "This is a sample transcript for testing."
 
-    # test student_qa agent
     try:
-        student_qa_agent_responses: List[StudentQA] = student_qa_agent(
-            model_id=settings.google_gemini_model_id,
-            cache_name=cache_name,
-            ttl=settings.google_gemini_cache_ttl,
-        )
-        print(student_qa_agent_responses)
-
+        result = summary_agent(transcript=transcript)
+        print("Summary:", result)
     except Exception as e:
-        print(f"Error creating question model: {e}")
+        print(f"Error: {e}")

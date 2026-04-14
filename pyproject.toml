@@ -5,7 +5,7 @@ description = "CLI tool for transforming lecture recordings into markdown notes.
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "google-genai>=1.63.0",
+    "openai>=1.82.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.0",
     "rich>=14.3.2",

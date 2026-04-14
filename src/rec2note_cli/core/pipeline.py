@@ -15,13 +15,14 @@ from rec2note_cli.core.agents import (
     student_qa_agent,
     summary_agent,
 )
-from rec2note_cli.core.llm import create_transcript_cache
 from rec2note_cli.core.models import Deadline, LectureSummary, StudentQA, StudyQuestion
+from rec2note_cli.enums.agent_enums import AgentType
 from rec2note_cli.utils.markdown_builder import build_markdown
 from rec2note_cli.utils.read_file import read_file
 
-console = Console()
 settings = get_settings()
+
+console = Console()
 
 _PANEL_WIDTH = 106
 
@@ -31,25 +32,26 @@ async def _run_agent_with_semaphore(
     agent_func: Callable[
         ..., LectureSummary | list[Deadline] | list[StudentQA] | list[StudyQuestion]
     ],
-    cache_name: str,
+    transcript: str,
+    model_id: str | None = None,
 ) -> LectureSummary | list[Deadline] | list[StudentQA] | list[StudyQuestion]:
     async with semaphore:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, partial(agent_func, cache_name=cache_name)
+            None, partial(agent_func, transcript=transcript, model_id=model_id)
         )
 
 
 def run_minimal_pipeline(note_name: str, transcription_path: str) -> str:
     """
-    Run minimal pipline - only run summary agent
+    Run minimal pipeline - only run summary agent.
 
     Args:
-        note_name (str): Name of the note to be created.
-        transcription_path (str): Path to the transcription file.
+        note_name: Name of the note to be created.
+        transcription_path: Path to the transcription file.
 
     Returns:
-        str: Markdown content of the note.
+        Markdown content of the note.
 
     Raises:
         ValueError: If the transcription file is empty.
@@ -75,16 +77,12 @@ def run_minimal_pipeline(note_name: str, transcription_path: str) -> str:
         f"[dim]({len(transcript):,} characters)[/dim]"
     )
 
-    console.print("\n[bold cyan]📦 Creating transcript cache...[/bold cyan]")
-    cache_name = create_transcript_cache(
-        model_id=settings.google_gemini_model_id,
-        transcript=transcript,
-    )
-    console.print(f"[green]✓[/green] Cache created: [dim]{cache_name}[/dim]")
-
     console.print()
     with console.status("[yellow]🤖 Running summary agent...[/yellow]", spinner="dots"):
-        summary = summary_agent(cache_name=cache_name)
+        summary = summary_agent(
+            transcript=transcript,
+            model_id=settings.agent_model_id[AgentType.SUMMARY],
+        )
     console.print("[green]✓[/green] [bold]Summary[/bold] complete.")
 
     console.print()
@@ -97,14 +95,14 @@ def run_minimal_pipeline(note_name: str, transcription_path: str) -> str:
 
 def run_full_pipeline(note_name: str, transcription_path: str) -> str:
     """
-    Run full pipline - summary + student QA + deadline + study Qs
+    Run full pipeline - summary + student QA + deadline + study Qs.
 
     Args:
-        note_name (str): Name of the note to be created.
-        transcription_path (str): Path to the transcription file.
+        note_name: Name of the note to be created.
+        transcription_path: Path to the transcription file.
 
     Returns:
-        str: Markdown content of the note.
+        Markdown content of the note.
 
     Raises:
         ValueError: If the transcription file is empty.
@@ -118,10 +116,10 @@ def run_full_pipeline(note_name: str, transcription_path: str) -> str:
         title="[bold blue]Job Details[/bold blue]",
         border_style="blue",
         width=_PANEL_WIDTH,
+        padding=(1, 2),
     )
     console.print(Align.center(job_panel))
 
-    # reading transcript and build transcript cache
     console.print("\n[bold cyan]📄 Reading transcript...[/bold cyan]")
     transcript = read_file(transcription_path)
     if not transcript.strip():
@@ -131,24 +129,16 @@ def run_full_pipeline(note_name: str, transcription_path: str) -> str:
         f"[dim]({len(transcript):,} characters)[/dim]"
     )
 
-    console.print("\n[bold cyan]📦 Creating transcript cache...[/bold cyan]")
-    cache_name = create_transcript_cache(
-        model_id=settings.google_gemini_model_id,
-        transcript=transcript,
-    )
-    console.print(f"[green]✓[/green] Cache created: [dim]{cache_name}[/dim]")
-
-    # call agents concurrently
     async def run_agents_with_progress(progress: Progress, tasks: dict):
         semaphore = asyncio.Semaphore(3)
 
-        async def run_and_update(agent_func, task_key, agent_name):
+        async def run_and_update(agent_func, task_key, agent_name, model_id=None):
             progress.update(
                 tasks[task_key], description=f"[yellow]⏳ {agent_name}", completed=0
             )
             try:
                 result = await _run_agent_with_semaphore(
-                    semaphore, agent_func, cache_name
+                    semaphore, agent_func, transcript, model_id
                 )
                 progress.update(
                     tasks[task_key],
@@ -164,10 +154,30 @@ def run_full_pipeline(note_name: str, transcription_path: str) -> str:
                 raise
 
         results = await asyncio.gather(
-            run_and_update(summary_agent, "summary", "Summary"),
-            run_and_update(deadline_agent, "deadlines", "Deadlines"),
-            run_and_update(questions_agent, "questions", "Study Questions"),
-            run_and_update(student_qa_agent, "student_qa", "Student Q&A"),
+            run_and_update(
+                summary_agent,
+                "summary",
+                "Summary",
+                model_id=settings.agent_model_id[AgentType.SUMMARY],
+            ),
+            run_and_update(
+                deadline_agent,
+                "deadlines",
+                "Deadlines",
+                model_id=settings.agent_model_id[AgentType.DEADLINE],
+            ),
+            run_and_update(
+                questions_agent,
+                "questions",
+                "Study Questions",
+                model_id=settings.agent_model_id[AgentType.QUESTIONS],
+            ),
+            run_and_update(
+                student_qa_agent,
+                "student_qa",
+                "Student Q&A",
+                model_id=settings.agent_model_id[AgentType.STUDENT_QA],
+            ),
             return_exceptions=True,
         )
 

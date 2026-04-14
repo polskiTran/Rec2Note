@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Rec2Note is a Python CLI tool that transforms lecture recordings into structured markdown notes using Google Gemini LLM agents. It uses a pipeline architecture: transcript input → LLM agent processing → markdown output.
+Rec2Note is a Python CLI tool that transforms lecture recordings into structured markdown notes using LLM agents. It uses a pipeline architecture: transcript input → LLM agent processing → markdown output.
 
 ## Tech Stack
 
@@ -10,7 +10,7 @@ Rec2Note is a Python CLI tool that transforms lecture recordings into structured
 - **Package manager**: uv (NOT pip)
 - **CLI framework**: Typer
 - **Terminal UI**: Rich
-- **LLM**: Google Gemini API (`google-genai`)
+- **LLM**: OpenAI-compatible API via the `openai` SDK — any provider (OpenAI, Azure, Google Vertex, Ollama, Groq, Together, etc.)
 - **Settings**: pydantic-settings (loads `.env`)
 - **Models**: Pydantic v2
 - **Retry logic**: tenacity
@@ -25,7 +25,7 @@ src/rec2note_cli/
 ├── cli/              # CLI commands (process.py)
 ├── core/             # Business logic
 │   ├── agents.py     # LLM agents (summary, deadlines, questions, student_qa)
-│   ├── llm.py        # Gemini API client + cache creation
+│   ├── llm.py        # OpenAI-compatible API client
 │   ├── models.py     # Pydantic models (LectureSummary, Deadline, etc.)
 │   ├── pipeline.py   # Orchestrates agents → markdown
 │   └── db.py         # SQLite storage
@@ -33,6 +33,36 @@ src/rec2note_cli/
 ├── prompts/          # Markdown instruction files per agent
 ├── ui/               # Rich console, panels, progress
 └── utils/            # read_file, timestamp, markdown_builder
+```
+
+## LLM Configuration
+
+Rec2Note uses the OpenAI SDK with a configurable `base_url`, so it works with any OpenAI-compatible provider. Configure via environment variables in `.env`:
+
+```bash
+LLM_API_KEY=your_api_key_here
+LLM_BASE_URL=https://api.openai.com/v1   # or your provider's endpoint
+LLM_MODEL_ID=gpt-4.1-mini                 # any model your provider supports
+LLM_TEMPERATURE=0.3
+LLM_MAX_TOKENS=8192
+```
+
+### Provider Examples
+
+| Provider | `LLM_BASE_URL` | Notes |
+|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | Default |
+| Azure OpenAI | `https://<resource>.openai.azure.com/v1` | Uses Azure AD or API key auth |
+| Google Vertex | `https://<region>-aiplatform.googleapis.com/v1beta1/openapi/` | Requires ADC or service account |
+| Ollama (local) | `http://localhost:11434/v1` | Runs open-weight models locally |
+| Groq | `https://api.groq.com/openai/v1` | Fast inference for open models |
+| Together | `https://api.together.xyz/v1` | Managed inference |
+| SillyTavern | `http://localhost:11400/v1` | Local inference server |
+
+**Note:** The previous `google-gemini` SDK is no longer used. Gemini can still be accessed via its OpenAI-compatible endpoint:
+```
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_MODEL_ID=gemini-2.5-flash
 ```
 
 ## Commands
@@ -56,10 +86,11 @@ uv run rec2note -tr path/to/transcript.txt -f -pr    # Full pipeline with previe
 ```bash
 uv run pytest                     # Run all tests
 uv run pytest tests/ -v           # Verbose output
-uv run pytest tests/test_markdown_builder.py  # Single file
+uv run pytest tests/test_llm.py    # LLM module tests
+uv run pytest tests/test_markdown_builder.py  # Markdown builder tests
 ```
 
-### Lint & Typecheck
+### Lint & Format
 
 ```bash
 uv run ruff check .               # Lint
@@ -73,8 +104,8 @@ uv run ty check .                 # ty check
 
 - **Type hints everywhere**: All function signatures must include parameter and return types.
 - **Use `pathlib.Path`** instead of `os.path` for file paths.
-- **Use `str | None`** syntax (Python 3.13 union) over `Optional[str]` in new code.
-- **Use `list[X]`** over `List[X]` from typing in new code (models.py has legacy `List` — prefer lowercase).
+- **Use `str | None`** syntax (Python 3.13 union) over `Optional[str]`.
+- **Use `list[X]`** over `List[X]` from typing.
 - **No comments** unless explicitly requested.
 - **Docstrings**: Use Google-style docstrings with Args/Returns/Raises sections for public functions and classes (see `agents.py` for reference).
 - **Section separators**: Use `# ---...---` comment blocks to divide logical sections within a file.
@@ -98,6 +129,7 @@ uv run ty check .                 # ty check
 - Secrets loaded from `.env` file.
 - Access settings through the cached `get_settings()` singleton.
 - Never hardcode API keys or model IDs.
+- Settings uses `extra="ignore"` to gracefully ignore deprecated env var names during migrations.
 
 ### Error Handling
 
@@ -139,7 +171,8 @@ uv run ty check .                 # ty check
 
 ## Architecture Notes
 
-- **Agent pattern**: Each agent function takes a `cache_name` and returns a typed Pydantic model. Parsing is separated into `_parse_*_response()` helpers.
+- **LLM client** (`llm.py`): Single `call_llm()` function wrapping the `openai` SDK. All agents call this one function. JSON mode is enabled by default via `response_format={"type": "json_object"}`.
+- **Agent pattern**: Each agent function takes a `transcript: str` and returns a typed Pydantic model. Parsing is separated into `_parse_*_response()` helpers.
+- **No server-side caching**: Each agent call sends the full transcript as the user message. This is simpler and universally compatible with all OpenAI-compatible providers.
 - **Pipeline orchestration**: `pipeline.py` coordinates agent calls. Minimal pipeline runs summary only; full pipeline runs all four agents concurrently via `asyncio.gather`.
-- **LLM caching**: Transcripts are cached via Gemini's context caching API to avoid re-uploading large texts.
 - **Markdown builder**: `utils/markdown_builder.py` assembles the final note from Pydantic model outputs. Optional sections (deadlines, student QA, study questions) are omitted when empty.

@@ -8,17 +8,21 @@ from rec2note_cli.enums.agent_enums import AgentType
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env")  # Loads .env by default
-    google_gemini_api_key: str = ""
-    google_gemini_model_id: str = "gemini-3.1-flash-lite-preview"
-    google_gemini_cache_ttl: str = "300s"  # seconds
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model_id: str = "gpt-4.1-mini"
+    llm_max_tokens: int = 8192
+    llm_temperature: float = 0.3
 
-    # models for different agents
-    # deadline_agent_model_id: str = "gemini-2.5-flash"
-    # questions_agent_model_id: str = "gemini-2.5-flash"
-    # student_qa_agent_model_id: str = "gemini-2.5-flash"
-    # summary_agent_model_id: str = "gemini-2.5-flash"
-    # visual_aids_search_agent_model_id: str = "gemini-2.5-flash"
+    # models for agents
+    agent_model_id: dict[AgentType, str] = {
+        AgentType.DEADLINE: "gpt-5.4-nano",
+        AgentType.QUESTIONS: "gpt-5.4-nano",
+        AgentType.STUDENT_QA: "gpt-5.4-nano",
+        AgentType.SUMMARY: "gpt-5.4",
+        AgentType.VISUAL_AIDS_SEARCH: "gpt-5.4-nano",
+    }
 
     # prompts path
     prompts_dir_path: str = str(Path(__file__).parent / "prompts")
