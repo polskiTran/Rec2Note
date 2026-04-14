@@ -10,8 +10,15 @@ from rec2note_cli.enums.agent_enums import AgentType
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")  # Loads .env by default
     google_gemini_api_key: str = ""
-    google_gemini_model_id: str = "gemini-2.5-flash"
+    google_gemini_model_id: str = "gemini-3.1-flash-lite-preview"
     google_gemini_cache_ttl: str = "300s"  # seconds
+
+    # models for different agents
+    # deadline_agent_model_id: str = "gemini-2.5-flash"
+    # questions_agent_model_id: str = "gemini-2.5-flash"
+    # student_qa_agent_model_id: str = "gemini-2.5-flash"
+    # summary_agent_model_id: str = "gemini-2.5-flash"
+    # visual_aids_search_agent_model_id: str = "gemini-2.5-flash"
 
     # prompts path
     prompts_dir_path: str = str(Path(__file__).parent / "prompts")
