@@ -92,6 +92,7 @@ uv run pytest tests/test_markdown_builder.py  # Markdown builder tests
 
 ### Lint & Format
 
+Run to check lint and type check 
 ```bash
 uv run ruff check .               # Lint
 uv run ruff format .              # Format
