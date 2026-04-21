@@ -2,6 +2,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from functools import partial
+from typing import Any
 
 from rec2note_cli.config import get_settings
 from rec2note_cli.core.agents import (
@@ -10,6 +11,7 @@ from rec2note_cli.core.agents import (
     student_qa_agent,
     summary_agent,
 )
+from rec2note_cli.core.models import Deadline, LectureSummary, StudentQA, StudyQuestion
 from rec2note_cli.core.pipeline_models import AgentOutcome, PipelineResult
 from rec2note_cli.enums.agent_enums import AgentType
 from rec2note_cli.utils.read_file import read_file
@@ -37,7 +39,7 @@ async def _run_agent_timed(
     agent_type: AgentType,
     model_id: str | None,
     on_progress: ProgressCallback | None,
-) -> AgentOutcome:
+) -> tuple[AgentOutcome, Any]:
     """Run a single agent inside the semaphore and return its outcome.
 
     Args:
@@ -49,7 +51,8 @@ async def _run_agent_timed(
         on_progress: Optional callback invoked with (agent_type, status, elapsed).
 
     Returns:
-        An :class:`AgentOutcome` reflecting success or failure.
+        A tuple of (:class:`AgentOutcome`, result_payload). result_payload is
+        the agent's typed return value on success, or ``None`` on failure.
     """
     async with semaphore:
         if on_progress:
@@ -114,7 +117,9 @@ def run_minimal_pipeline(
 
     async def _run() -> PipelineResult:
         semaphore = asyncio.Semaphore(1)
-        outcome, summary = await _run_agent_timed(
+        outcome: AgentOutcome
+        result: LectureSummary | None
+        outcome, result = await _run_agent_timed(
             semaphore,
             summary_agent,
             transcript,
@@ -123,7 +128,7 @@ def run_minimal_pipeline(
             on_progress,
         )
         return PipelineResult(
-            summary=summary,
+            summary=result,
             outcomes=[outcome],
             total_elapsed_seconds=time.perf_counter() - pipeline_start,
         )
@@ -138,15 +143,20 @@ def run_full_pipeline(
 ) -> PipelineResult:
     """Run the full pipeline — summary, deadlines, study questions, student Q&A.
 
-    All four agents run concurrently. A failed agent does not abort the pipeline;
-    its slot in :class:`PipelineResult` will hold the default (None / empty list)
-    and the corresponding :class:`AgentOutcome` will have ``success=False``.
+    The deadline agent runs first to warm the LLM prompt cache. Once it
+    completes, a brief settle period allows the provider to persist the cache.
+    The remaining three agents (summary, study questions, student Q&A) then run
+    concurrently so they can reuse the cached prefix tokens, reducing cost.
+    A failed agent does not abort the pipeline; its slot in
+    :class:`PipelineResult` will hold the default (None / empty list) and the
+    corresponding :class:`AgentOutcome` will have ``success=False``.
 
     Args:
         note_name: Display name for the note being created.
         transcription_path: Path to the plain-text transcript file.
         on_progress: Optional callback ``(agent_type, status, elapsed)`` invoked
-            on agent state transitions.
+            on agent state transitions. Status values: ``"warming_cache"``,
+            ``"waiting"``, ``"running"``, ``"done"``, ``"failed"``.
 
     Returns:
         A :class:`PipelineResult` with whatever agents succeeded.
@@ -163,21 +173,56 @@ def run_full_pipeline(
     async def _run() -> PipelineResult:
         semaphore = asyncio.Semaphore(3)
 
-        tasks = await asyncio.gather(
+        # Mark remaining agents as waiting before cache warmup begins
+        if on_progress:
+            on_progress(AgentType.SUMMARY, "waiting", 0.0)
+            on_progress(AgentType.QUESTIONS, "waiting", 0.0)
+            on_progress(AgentType.STUDENT_QA, "waiting", 0.0)
+
+        # Phase 1: deadline agent warms the prompt cache
+        warmup_callback: ProgressCallback | None = None
+        if on_progress:
+
+            def _warmup_progress(
+                agent_type: AgentType, status: str, elapsed: float
+            ) -> None:
+                if agent_type == AgentType.DEADLINE and status == "running":
+                    on_progress(agent_type, "warming_cache", elapsed)
+                else:
+                    on_progress(agent_type, status, elapsed)
+
+            warmup_callback = _warmup_progress
+
+        outcome_dl: AgentOutcome
+        deadlines: list[Deadline] | None
+        outcome_dl, deadlines = await _run_agent_timed(
+            semaphore,
+            deadline_agent,
+            transcript,
+            AgentType.DEADLINE,
+            settings.agent_model_id[AgentType.DEADLINE],
+            warmup_callback,
+        )
+
+        # Phase 2: remaining agents run concurrently (cache warm)
+        outcome_summary: AgentOutcome
+        summary: LectureSummary | None
+        outcome_sq: AgentOutcome
+        study_qs: list[StudyQuestion] | None
+        outcome_qa: AgentOutcome
+        student_qa: list[StudentQA] | None
+
+        (
+            (outcome_summary, summary),
+            (outcome_sq, study_qs),
+            (outcome_qa, student_qa),
+        ) = await asyncio.gather(
             _run_agent_timed(
                 semaphore,
                 summary_agent,
                 transcript,
                 AgentType.SUMMARY,
                 settings.agent_model_id[AgentType.SUMMARY],
-                on_progress,
-            ),
-            _run_agent_timed(
-                semaphore,
-                deadline_agent,
-                transcript,
-                AgentType.DEADLINE,
-                settings.agent_model_id[AgentType.DEADLINE],
                 on_progress,
             ),
             _run_agent_timed(
@@ -197,13 +242,6 @@ def run_full_pipeline(
                 on_progress,
             ),
         )
-
-        (
-            (outcome_summary, summary),
-            (outcome_dl, deadlines),
-            (outcome_sq, study_qs),
-            (outcome_qa, student_qa),
-        ) = tasks
 
         return PipelineResult(
             summary=summary,

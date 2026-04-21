@@ -172,8 +172,8 @@ uv run ty check .                 # ty check
 
 ## Architecture Notes
 
-- **LLM client** (`llm.py`): Single `call_llm()` function wrapping the `openai` SDK. All agents call this one function. JSON mode is enabled by default via `response_format={"type": "json_object"}`.
-- **Agent pattern**: Each agent function takes a `transcript: str` and returns a typed Pydantic model. Parsing is separated into `_parse_*_response()` helpers.
-- **No server-side caching**: Each agent call sends the full transcript as the user message. This is simpler and universally compatible with all OpenAI-compatible providers.
-- **Pipeline orchestration**: `pipeline.py` coordinates agent calls. Minimal pipeline runs summary only; full pipeline runs all four agents concurrently via `asyncio.gather`.
+- **LLM client** (`llm.py`): Single `call_llm()` function wrapping the `openai` SDK. All agents call this one function. JSON mode is enabled by default via `response_format={"type": "json_object"}`. Supports a `task_prompt` parameter that appends a second user message after the main `user_prompt`, enabling transcript-first message ordering for prompt caching.
+- **Agent pattern**: Each agent function takes a `transcript: str` and returns a typed Pydantic model. Parsing is separated into `_parse_*_response()` helpers. All agents use a shared system prompt (`shared_system_instructions.md`) followed by the transcript as `user_prompt` and agent-specific instructions as `task_prompt`. This ordering ensures the long transcript content forms a cacheable prefix shared across all agents.
+- **Prompt cache optimisation**: By placing the shared system prompt first, the transcript second, and agent-specific instructions last, the LLM provider can reuse cached prefix tokens across agent calls. The first agent (deadline) warms the cache; subsequent agents hit it. This reduces input token cost significantly for long transcripts.
+- **Pipeline orchestration**: `pipeline.py` coordinates agent calls. Minimal pipeline runs summary only; full pipeline uses a two-phase strategy — the deadline agent runs first to warm the LLM prompt cache, then the remaining agents (summary, study questions, student Q&A) run concurrently via `asyncio.gather` to reuse cached prefix tokens and reduce cost.
 - **Markdown builder**: `utils/markdown_builder.py` assembles the final note from Pydantic model outputs. Optional sections (deadlines, student QA, study questions) are omitted when empty.

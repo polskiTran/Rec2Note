@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     # prompts path
     prompts_dir_path: str = str(Path(__file__).parent / "prompts")
+    shared_system_prompt_path: str = prompts_dir_path + "/shared_system_instructions.md"
     agent_instructions: dict[AgentType, str] = {
         AgentType.DEADLINE: prompts_dir_path + "/deadline_instructions.md",
         AgentType.QUESTIONS: prompts_dir_path + "/questions_instructions.md",

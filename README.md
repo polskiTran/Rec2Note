@@ -8,11 +8,12 @@ Rec2Note is a CLI tool for transforming lecture recordings into student notes th
 The app is in active development. Currently available:
 - CLI interface for processing transcripts
 - Minimal pipeline (summary generation)
-- Full pipeline (summary + deadlines + study questions + student Q&A)
+- Full pipeline — two-phase execution for cost efficiency:
+  - **Phase 1 (cache warmup):** the deadline agent runs first, warming the LLM provider's prompt cache with the shared transcript prefix.
+  - **Phase 2 (cache-harvested concurrent):** the remaining agents (summary, study questions, student Q&A) run concurrently, reusing the cached prefix tokens to reduce input-token cost.
 - Rich terminal output with preview
 
 Planned features (not yet implemented):
-- Streamlit web UI
 - Textual TUI
 - Auto-transcription from media files
 - SQLite database for storing notes
@@ -99,7 +100,7 @@ Rec2Note/
         ├── core/           # Business logic
         │   ├── agents.py   # LLM agents (summary, deadlines, etc.)
         │   ├── db.py       # SQLite storage for lecture notes
-        │   ├── llm.py      # Gemini API client
+        │   ├── llm.py      # LLM API client
         │   ├── models.py   # Pydantic models and LectureNoteResult
         │   └── pipeline.py # Orchestrates transcript → agents → DB
         ├── enums/
@@ -112,5 +113,5 @@ Rec2Note/
 
 - Package manager: uv
 - CLI: Typer + Rich
-- LLM: Gemini API
+- LLM: Bring your own API (openai compatible)
 - DB: SQLite (built-in, `data/rec2note.db`)

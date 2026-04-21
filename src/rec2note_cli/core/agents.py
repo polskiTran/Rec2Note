@@ -24,16 +24,37 @@ settings = get_settings()
 
 
 def _load_prompt(agent_type: AgentType) -> str:
-    """Read agent prompt from the prompts directory and return its text.
+    """Read agent task instructions from the prompts directory.
 
     Args:
         agent_type: The type of agent for which to load the prompt.
 
     Returns:
-        The prompt text.
+        The task instruction text.
     """
     path = Path(settings.agent_instructions[agent_type])
     return path.read_text(encoding="utf-8")
+
+
+def _load_shared_system_prompt() -> str:
+    """Read the shared system prompt used by all agents for prompt caching.
+
+    Returns:
+        The shared system instruction text.
+    """
+    path = Path(settings.shared_system_prompt_path)
+    return path.read_text(encoding="utf-8")
+
+
+_SHARED_SYSTEM_PROMPT: str | None = None
+
+
+def _get_shared_system_prompt() -> str:
+    """Return the cached shared system prompt, loading it on first access."""
+    global _SHARED_SYSTEM_PROMPT
+    if _SHARED_SYSTEM_PROMPT is None:
+        _SHARED_SYSTEM_PROMPT = _load_shared_system_prompt()
+    return _SHARED_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +102,13 @@ def visual_aids_agent(
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.VISUAL_AIDS_SEARCH)
-    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    shared = _get_shared_system_prompt()
+    response = call_llm(
+        system_prompt=shared,
+        user_prompt=transcript,
+        task_prompt=prompt,
+        model_id=model_id,
+    )
     return _parse_visual_aids_response(response.content), response.usage
 
 
@@ -102,7 +129,13 @@ def summary_agent(
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.SUMMARY)
-    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    shared = _get_shared_system_prompt()
+    response = call_llm(
+        system_prompt=shared,
+        user_prompt=transcript,
+        task_prompt=prompt,
+        model_id=model_id,
+    )
     return _parse_summary_response(response.content), response.usage
 
 
@@ -123,7 +156,13 @@ def deadline_agent(
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.DEADLINE)
-    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    shared = _get_shared_system_prompt()
+    response = call_llm(
+        system_prompt=shared,
+        user_prompt=transcript,
+        task_prompt=prompt,
+        model_id=model_id,
+    )
     return _parse_deadline_response(response.content), response.usage
 
 
@@ -144,7 +183,13 @@ def questions_agent(
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.QUESTIONS)
-    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    shared = _get_shared_system_prompt()
+    response = call_llm(
+        system_prompt=shared,
+        user_prompt=transcript,
+        task_prompt=prompt,
+        model_id=model_id,
+    )
     return _parse_questions_response(response.content), response.usage
 
 
@@ -170,7 +215,13 @@ def student_qa_agent(
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.STUDENT_QA)
-    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    shared = _get_shared_system_prompt()
+    response = call_llm(
+        system_prompt=shared,
+        user_prompt=transcript,
+        task_prompt=prompt,
+        model_id=model_id,
+    )
     return _parse_student_qa_response(response.content), response.usage
 
 

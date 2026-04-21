@@ -146,6 +146,8 @@ class AgentProgressTracker:
         _lock: Mutex for thread-safe updates from asyncio executor threads.
     """
 
+    _ACTIVE_STATUSES = {"running", "warming_cache"}
+
     def __init__(self, agents: list[AgentType]) -> None:
         self._states: dict[AgentType, str] = {a: "pending" for a in agents}
         self._elapsed: dict[AgentType, float] = {a: 0.0 for a in agents}
@@ -157,7 +159,7 @@ class AgentProgressTracker:
         """Update state from the pipeline's progress callback."""
         with self._lock:
             self._states[agent] = status
-            if status == "running":
+            if status in self._ACTIVE_STATUSES:
                 self._start_times[agent] = time.perf_counter()
             else:
                 self._elapsed[agent] = elapsed
@@ -180,8 +182,21 @@ class AgentProgressTracker:
                     t.append(f"{label:<{_LABEL_WIDTH}}", style="bright_black")
                     t.append("  —", style="bright_black")
 
+                elif status == "waiting":
+                    t.append(f"  {'·':2}  ", style="bright_black")
+                    t.append(f"{label:<{_LABEL_WIDTH}}", style="dim cyan")
+                    t.append("  queued", style="dim cyan")
+
+                elif status == "warming_cache":
+                    frame_idx = int(now * 6) % len(_SPINNER_FRAMES)
+                    spinner = _SPINNER_FRAMES[frame_idx]
+                    elapsed = now - self._start_times.get(agent, now)
+                    t.append(f"  {spinner}   ", style="yellow")
+                    t.append(f"{label:<{_LABEL_WIDTH}}", style="yellow")
+                    t.append(f"  {elapsed:.1f}s  warming cache", style="dim yellow")
+
                 elif status == "running":
-                    frame_idx = int(now * 6) % 4
+                    frame_idx = int(now * 6) % len(_SPINNER_FRAMES)
                     spinner = _SPINNER_FRAMES[frame_idx]
                     elapsed = now - self._start_times.get(agent, now)
                     t.append(f"  {spinner}   ", style="cyan")

@@ -20,7 +20,7 @@ def build_markdown(
 
     # Summary
     markdown += "## Summary\n\n"
-    markdown += f"### Overview\n > [!NOTE]\n > {summary.overview}\n\n"
+    markdown += f"### Overview\n > [!NOTE] Overview\n > {summary.overview}\n\n"
     markdown += "### Key Points\n"
     for key_point in summary.key_points:
         markdown += f"- {key_point}\n"

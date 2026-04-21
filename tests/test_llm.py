@@ -123,3 +123,89 @@ class TestCallLlm:
         result = call_llm(user_prompt="Cache test.", json_mode=False)
 
         assert result.usage.cached_tokens == 8
+
+
+class TestCallLlmTaskPrompt:
+    @patch("rec2note_cli.core.llm._get_client")
+    def test_task_prompt_appends_second_user_message(self, mock_get_client: MagicMock):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _make_mock_response(
+            '{"result": "ok"}'
+        )
+        mock_get_client.return_value = mock_client
+
+        call_llm(
+            system_prompt="You are an assistant.",
+            user_prompt="Full transcript text here.",
+            task_prompt="Extract deadlines from the transcript.",
+            json_mode=True,
+        )
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["messages"] == [
+            {"role": "system", "content": "You are an assistant."},
+            {"role": "user", "content": "Full transcript text here."},
+            {"role": "user", "content": "Extract deadlines from the transcript."},
+        ]
+
+    @patch("rec2note_cli.core.llm._get_client")
+    def test_task_prompt_without_system_prompt(self, mock_get_client: MagicMock):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _make_mock_response(
+            '{"result": "ok"}'
+        )
+        mock_get_client.return_value = mock_client
+
+        call_llm(
+            user_prompt="Transcript content.",
+            task_prompt="Summarize the above.",
+            json_mode=True,
+        )
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["messages"] == [
+            {"role": "user", "content": "Transcript content."},
+            {"role": "user", "content": "Summarize the above."},
+        ]
+
+    @patch("rec2note_cli.core.llm._get_client")
+    def test_no_task_prompt_backward_compatible(self, mock_get_client: MagicMock):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _make_mock_response(
+            '{"result": "ok"}'
+        )
+        mock_get_client.return_value = mock_client
+
+        call_llm(
+            system_prompt="You are an assistant.",
+            user_prompt="Hello.",
+            json_mode=False,
+        )
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["messages"] == [
+            {"role": "system", "content": "You are an assistant."},
+            {"role": "user", "content": "Hello."},
+        ]
+
+    @patch("rec2note_cli.core.llm._get_client")
+    def test_task_prompt_none_equivalent_to_omitted(self, mock_get_client: MagicMock):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _make_mock_response(
+            '{"result": "ok"}'
+        )
+        mock_get_client.return_value = mock_client
+
+        call_llm(
+            system_prompt="System.",
+            user_prompt="User.",
+            task_prompt=None,
+            json_mode=False,
+        )
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert len(call_kwargs["messages"]) == 2
+        assert call_kwargs["messages"] == [
+            {"role": "system", "content": "System."},
+            {"role": "user", "content": "User."},
+        ]

@@ -30,17 +30,22 @@ def call_llm(
     temperature: float | None = None,
     max_tokens: int | None = None,
     json_mode: bool = True,
+    task_prompt: str | None = None,
 ) -> LLMResponse:
     """Call an OpenAI-compatible LLM and return the response envelope.
 
     Args:
         system_prompt: Optional system instruction.
-        user_prompt: The user's message content.
+        user_prompt: The user's message content (typically the transcript).
         model_id: Override the default model from settings.
         temperature: Override the default temperature from settings.
         max_tokens: Override the default max_tokens from settings.
         json_mode: If True (default), request JSON object output via
                    response_format. Set to False for plain text responses.
+        task_prompt: Optional second user message appended after user_prompt.
+            Used for agent-specific task instructions when user_prompt
+            carries the shared transcript. This ordering ensures the
+            transcript forms a cacheable prefix across all agents.
 
     Returns:
         An :class:`LLMResponse` containing the reply text, resolved model
@@ -58,6 +63,8 @@ def call_llm(
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": user_prompt})
+    if task_prompt:
+        messages.append({"role": "user", "content": task_prompt})
 
     response = client.chat.completions.create(
         model=model_id or settings.llm_model_id,
