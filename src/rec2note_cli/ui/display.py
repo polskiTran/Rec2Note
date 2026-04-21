@@ -35,7 +35,7 @@ _AGENT_LABELS: dict[AgentType, str] = {
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 _LABEL_WIDTH = 20
-_DIM_RULE_STYLE = "bright_black"
+_RULE_STYLE = "r2n.rule"
 
 # ---------------------------------------------------------------------------
 # Blackhole ASCII art
@@ -64,9 +64,7 @@ _BLACKHOLE = r"""
   ,,,,,,,,,,,//||||\,,,,,,,,,,,,,,,,,,o==o
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;"""
 
-_TAGLINE = (
-    "[bright_black]lecture recordings  →  structured markdown notes[/bright_black]"
-)
+_TAGLINE = "[r2n.value]lecture recordings[/r2n.value]  [r2n.section]→[/r2n.section]  [r2n.key]structured markdown notes[/r2n.key]"
 
 
 # ---------------------------------------------------------------------------
@@ -102,14 +100,14 @@ def print_header(
     console.print(_BLACKHOLE)
     console.print(_TAGLINE, justify="center")
     console.print()
-    console.print(Rule(style=_DIM_RULE_STYLE))
+    console.print(Rule(style=_RULE_STYLE))
     console.print()
 
     kw = 14
 
     def _row(key: str, value: str) -> None:
         console.print(
-            f"  [r2n.muted]{key:<{kw}}[/r2n.muted]  [r2n.value]{value}[/r2n.value]"
+            f"  [r2n.key]{key:<{kw}}[/r2n.key]  [r2n.value]{value}[/r2n.value]"
         )
 
     _row("note", note_name)
@@ -127,7 +125,7 @@ def print_header(
         _row("preview", "on")
 
     console.print()
-    console.print(Rule(style=_DIM_RULE_STYLE))
+    console.print(Rule(style=_RULE_STYLE))
     console.print()
 
 
@@ -178,12 +176,12 @@ class AgentProgressTracker:
                 t = Text()
 
                 if status == "pending":
-                    t.append(f"  {'·':2}  ", style="bright_black")
-                    t.append(f"{label:<{_LABEL_WIDTH}}", style="bright_black")
-                    t.append("  —", style="bright_black")
+                    t.append(f"  {'·':2}  ", style="r2n.muted")
+                    t.append(f"{label:<{_LABEL_WIDTH}}", style="r2n.muted")
+                    t.append("  —", style="r2n.muted")
 
                 elif status == "waiting":
-                    t.append(f"  {'·':2}  ", style="bright_black")
+                    t.append(f"  {'·':2}  ", style="r2n.muted")
                     t.append(f"{label:<{_LABEL_WIDTH}}", style="dim cyan")
                     t.append("  queued", style="dim cyan")
 
@@ -191,31 +189,31 @@ class AgentProgressTracker:
                     frame_idx = int(now * 6) % len(_SPINNER_FRAMES)
                     spinner = _SPINNER_FRAMES[frame_idx]
                     elapsed = now - self._start_times.get(agent, now)
-                    t.append(f"  {spinner}   ", style="yellow")
-                    t.append(f"{label:<{_LABEL_WIDTH}}", style="yellow")
-                    t.append(f"  {elapsed:.1f}s  warming cache", style="dim yellow")
+                    t.append(f"  {spinner}   ", style="r2n.warn")
+                    t.append(f"{label:<{_LABEL_WIDTH}}", style="bold yellow")
+                    t.append(f"  {elapsed:.1f}s  warming cache", style="yellow")
 
                 elif status == "running":
                     frame_idx = int(now * 6) % len(_SPINNER_FRAMES)
                     spinner = _SPINNER_FRAMES[frame_idx]
                     elapsed = now - self._start_times.get(agent, now)
-                    t.append(f"  {spinner}   ", style="cyan")
-                    t.append(f"{label:<{_LABEL_WIDTH}}", style="white")
-                    t.append(f"  {elapsed:.1f}s", style="bright_black")
+                    t.append(f"  {spinner}   ", style="bold cyan")
+                    t.append(f"{label:<{_LABEL_WIDTH}}", style="bold white")
+                    t.append(f"  {elapsed:.1f}s", style="r2n.muted")
 
                 elif status == "done":
                     elapsed = self._elapsed.get(agent, 0.0)
-                    t.append(f"  {'✓':2}  ", style="green")
+                    t.append(f"  {'✓':2}  ", style="r2n.ok")
                     t.append(f"{label:<{_LABEL_WIDTH}}", style="green")
-                    t.append(f"  {elapsed:.1f}s", style="bright_black")
+                    t.append(f"  {elapsed:.1f}s", style="r2n.muted")
 
                 elif status == "failed":
                     elapsed = self._elapsed.get(agent, 0.0)
                     err = self._errors.get(agent, "")
                     short_err = (err[:42] + "…") if len(err) > 42 else err
-                    t.append(f"  {'✗':2}  ", style="red")
+                    t.append(f"  {'✗':2}  ", style="r2n.fail")
                     t.append(f"{label:<{_LABEL_WIDTH}}", style="red")
-                    t.append(f"  {elapsed:.1f}s", style="bright_black")
+                    t.append(f"  {elapsed:.1f}s", style="r2n.muted")
                     if short_err:
                         t.append(f"  [{short_err}]", style="dim red")
 
@@ -290,12 +288,12 @@ def print_preview(markdown_content: str) -> None:
         markdown_content: The full markdown string to render.
     """
     console.print()
-    console.print(Rule("[bright_black]preview[/bright_black]", style=_DIM_RULE_STYLE))
+    console.print(Rule("[r2n.section]preview[/r2n.section]", style=_RULE_STYLE))
     console.print()
     console.print(
         Panel(
             Markdown(markdown_content),
-            border_style="bright_black",
+            border_style="cyan",
             padding=(1, 2),
         )
     )
@@ -320,7 +318,7 @@ def print_dashboard(result: PipelineResult, output_path: Path) -> None:
         result: The completed :class:`PipelineResult`.
         output_path: Path where the note was saved.
     """
-    console.print(Rule("[bright_black]usage[/bright_black]", style=_DIM_RULE_STYLE))
+    console.print(Rule("[r2n.section]usage[/r2n.section]", style=_RULE_STYLE))
     console.print()
 
     outcome_map: dict[AgentType, AgentOutcome] = {o.agent: o for o in result.outcomes}
@@ -329,13 +327,13 @@ def print_dashboard(result: PipelineResult, output_path: Path) -> None:
     col_num = 10
 
     header = Text()
-    header.append(f"  {'agent':<{col_agent}}", style="bright_black")
-    header.append(f"{'prompt':>{col_num}}", style="bright_black")
-    header.append(f"{'cached':>{col_num}}", style="bright_black")
-    header.append(f"{'compl.':>{col_num}}", style="bright_black")
-    header.append(f"{'total':>{col_num}}", style="bright_black")
+    header.append(f"  {'agent':<{col_agent}}", style="r2n.key")
+    header.append(f"{'prompt':>{col_num}}", style="r2n.key")
+    header.append(f"{'cached':>{col_num}}", style="r2n.key")
+    header.append(f"{'compl.':>{col_num}}", style="r2n.key")
+    header.append(f"{'total':>{col_num}}", style="r2n.key")
     console.print(header)
-    console.print(f"  {'─' * (col_agent + col_num * 4)}", style="bright_black")
+    console.print(f"  {'─' * (col_agent + col_num * 4)}", style="r2n.rule")
 
     totals = TokenUsage(
         prompt_tokens=0, completion_tokens=0, total_tokens=0, cached_tokens=0
@@ -350,17 +348,17 @@ def print_dashboard(result: PipelineResult, output_path: Path) -> None:
         row = Text()
         row.append(
             f"  {label:<{col_agent}}",
-            style="white" if outcome.success else "bright_black",
+            style="bold white" if outcome.success else "r2n.muted",
         )
 
         if outcome.success and outcome.usage:
             u = outcome.usage
-            row.append(f"{_fmt_tokens(u.prompt_tokens):>{col_num}}", style="dim white")
+            row.append(f"{_fmt_tokens(u.prompt_tokens):>{col_num}}", style="r2n.number")
             row.append(f"{_fmt_tokens(u.cached_tokens):>{col_num}}", style="cyan")
             row.append(
-                f"{_fmt_tokens(u.completion_tokens):>{col_num}}", style="dim white"
+                f"{_fmt_tokens(u.completion_tokens):>{col_num}}", style="r2n.number"
             )
-            row.append(f"{_fmt_tokens(u.total_tokens):>{col_num}}", style="white")
+            row.append(f"{_fmt_tokens(u.total_tokens):>{col_num}}", style="bold white")
             totals.prompt_tokens += u.prompt_tokens
             totals.completion_tokens += u.completion_tokens
             totals.total_tokens += u.total_tokens
@@ -368,26 +366,27 @@ def print_dashboard(result: PipelineResult, output_path: Path) -> None:
             any_usage = True
         else:
             dash = f"{'—':>{col_num}}"
-            row.append(dash * 4, style="bright_black")
-            row.append("  ✗", style="red")
+            row.append(dash * 4, style="r2n.muted")
+            row.append("  ✗", style="r2n.fail")
 
         console.print(row)
 
     if any_usage:
-        console.print(f"  {'─' * (col_agent + col_num * 4)}", style="bright_black")
+        console.print(f"  {'─' * (col_agent + col_num * 4)}", style="r2n.rule")
         total_row = Text()
-        total_row.append(f"  {'total':<{col_agent}}", style="bright_black")
+        total_row.append(f"  {'total':<{col_agent}}", style="r2n.key")
         total_row.append(
-            f"{_fmt_tokens(totals.prompt_tokens):>{col_num}}", style="dim white"
+            f"{_fmt_tokens(totals.prompt_tokens):>{col_num}}", style="r2n.number"
         )
         total_row.append(
             f"{_fmt_tokens(totals.cached_tokens):>{col_num}}", style="cyan"
         )
         total_row.append(
-            f"{_fmt_tokens(totals.completion_tokens):>{col_num}}", style="dim white"
+            f"{_fmt_tokens(totals.completion_tokens):>{col_num}}", style="r2n.number"
         )
         total_row.append(
-            f"{_fmt_tokens(totals.total_tokens):>{col_num}}", style="bold white"
+            f"{_fmt_tokens(totals.total_tokens):>{col_num}}",
+            style="bold bright_magenta",
         )
         console.print(total_row)
 
@@ -395,18 +394,16 @@ def print_dashboard(result: PipelineResult, output_path: Path) -> None:
 
     if any_usage and totals.prompt_tokens > 0:
         hit_rate = totals.cached_tokens / totals.prompt_tokens * 100
-        console.print(
-            Rule("[bright_black]insights[/bright_black]", style=_DIM_RULE_STYLE)
-        )
+        console.print(Rule("[r2n.section]insights[/r2n.section]", style=_RULE_STYLE))
         console.print()
         kw = 20
         console.print(
-            f"  [bright_black]{'cache hit rate':<{kw}}[/bright_black]"
-            f"  [cyan]{hit_rate:.1f}%[/cyan]"
+            f"  [r2n.key]{'cache hit rate':<{kw}}[/r2n.key]"
+            f"  [r2n.number]{hit_rate:.1f}%[/r2n.number]"
         )
         console.print()
 
-    console.print(Rule("[bright_black]result[/bright_black]", style=_DIM_RULE_STYLE))
+    console.print(Rule("[r2n.section]result[/r2n.section]", style=_RULE_STYLE))
     console.print()
 
     total_s = result.total_elapsed_seconds
@@ -418,18 +415,17 @@ def print_dashboard(result: PipelineResult, output_path: Path) -> None:
 
     kw = 14
     console.print(
-        f"  [bright_black]{'saved':<{kw}}[/bright_black]  [white]{output_path}[/white]"
+        f"  [r2n.key]{'saved':<{kw}}[/r2n.key]  [r2n.value]{output_path}[/r2n.value]"
     )
     console.print(
-        f"  [bright_black]{'elapsed':<{kw}}[/bright_black]"
-        f"  [white]{elapsed_str}[/white]"
+        f"  [r2n.key]{'elapsed':<{kw}}[/r2n.key]  [r2n.value]{elapsed_str}[/r2n.value]"
     )
     console.print(
-        f"  [bright_black]{'agents':<{kw}}[/bright_black]"
-        f"  [white]{result.succeeded_count}[/white][bright_black]/{result.total_count} succeeded[/bright_black]"
+        f"  [r2n.key]{'agents':<{kw}}[/r2n.key]"
+        f"  [r2n.ok]{result.succeeded_count}[/r2n.ok][r2n.muted]/{result.total_count} succeeded[/r2n.muted]"
     )
     console.print()
-    console.print(Rule(style=_DIM_RULE_STYLE))
+    console.print(Rule(style=_RULE_STYLE))
     console.print()
 
 
@@ -445,6 +441,6 @@ def abort(message: str) -> NoReturn:
         message: Human-readable description of the error.
     """
     console.print()
-    console.print(f"  [red]✗[/red]  [white]{message}[/white]")
+    console.print(f"  [r2n.fail]✗[/r2n.fail]  [r2n.value]{message}[/r2n.value]")
     console.print()
     raise typer.Exit(code=1)
