@@ -3,6 +3,7 @@ from pathlib import Path
 
 from rec2note_cli.config import get_settings
 from rec2note_cli.core.llm import call_llm
+from rec2note_cli.core.llm_models import TokenUsage
 from rec2note_cli.core.models import (
     Deadline,
     KeyTerm,
@@ -23,8 +24,7 @@ settings = get_settings()
 
 
 def _load_prompt(agent_type: AgentType) -> str:
-    """
-    Read agent prompt from the prompts directory and return its text.
+    """Read agent prompt from the prompts directory and return its text.
 
     Args:
         agent_type: The type of agent for which to load the prompt.
@@ -67,98 +67,92 @@ def _require_key(data: dict, key: str, context: str = "response") -> list:
 def visual_aids_agent(
     transcript: str,
     model_id: str | None = None,
-) -> list[VisualAidTimestamp]:
-    """
-    Identify timestamps where visual aids are needed for comprehension.
+) -> tuple[list[VisualAidTimestamp], TokenUsage]:
+    """Identify timestamps where visual aids are needed for comprehension.
 
     Args:
         transcript: The full lecture transcript text.
         model_id: Override the default model from settings.
 
     Returns:
-        List of :class:`VisualAidTimestamp` objects.
+        Tuple of (list of :class:`VisualAidTimestamp`, :class:`TokenUsage`).
 
     Raises:
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.VISUAL_AIDS_SEARCH)
-    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
-    return _parse_visual_aids_response(raw)
+    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    return _parse_visual_aids_response(response.content), response.usage
 
 
 def summary_agent(
     transcript: str,
     model_id: str | None = None,
-) -> LectureSummary:
-    """
-    Produce a structured summary of a lecture transcript.
+) -> tuple[LectureSummary, TokenUsage]:
+    """Produce a structured summary of a lecture transcript.
 
     Args:
         transcript: The full lecture transcript text.
         model_id: Override the default model from settings.
 
     Returns:
-        A :class:`LectureSummary` with title, overview, key points, topics,
-        and key terms.
+        Tuple of (:class:`LectureSummary`, :class:`TokenUsage`).
 
     Raises:
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.SUMMARY)
-    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
-    return _parse_summary_response(raw)
+    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    return _parse_summary_response(response.content), response.usage
 
 
 def deadline_agent(
     transcript: str,
     model_id: str | None = None,
-) -> list[Deadline]:
-    """
-    Extract all deadlines and deliverables from a lecture transcript.
+) -> tuple[list[Deadline], TokenUsage]:
+    """Extract all deadlines and deliverables from a lecture transcript.
 
     Args:
         transcript: The full lecture transcript text.
         model_id: Override the default model from settings.
 
     Returns:
-        List of :class:`Deadline` objects.
+        Tuple of (list of :class:`Deadline`, :class:`TokenUsage`).
 
     Raises:
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.DEADLINE)
-    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
-    return _parse_deadline_response(raw)
+    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    return _parse_deadline_response(response.content), response.usage
 
 
 def questions_agent(
     transcript: str,
     model_id: str | None = None,
-) -> list[StudyQuestion]:
-    """
-    Generate study questions from a lecture transcript.
+) -> tuple[list[StudyQuestion], TokenUsage]:
+    """Generate study questions from a lecture transcript.
 
     Args:
         transcript: The full lecture transcript text.
         model_id: Override the default model from settings.
 
     Returns:
-        List of :class:`StudyQuestion` objects.
+        Tuple of (list of :class:`StudyQuestion`, :class:`TokenUsage`).
 
     Raises:
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.QUESTIONS)
-    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
-    return _parse_questions_response(raw)
+    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    return _parse_questions_response(response.content), response.usage
 
 
 def student_qa_agent(
     transcript: str,
     model_id: str | None = None,
-) -> list[StudentQA]:
-    """
-    Extract genuine student questions and lecturer answers from a transcript.
+) -> tuple[list[StudentQA], TokenUsage]:
+    """Extract genuine student questions and lecturer answers from a transcript.
 
     Only questions actually posed by students (audience members) are captured.
     Rhetorical questions and self-answered questions from the lecturer are
@@ -169,15 +163,15 @@ def student_qa_agent(
         model_id: Override the default model from settings.
 
     Returns:
-        List of :class:`StudentQA` objects.  Returns an empty list when no
-        student questions are present in the transcript.
+        Tuple of (list of :class:`StudentQA`, :class:`TokenUsage`).
+        Returns an empty list when no student questions are present.
 
     Raises:
         ValueError: If the model response cannot be parsed.
     """
     prompt = _load_prompt(AgentType.STUDENT_QA)
-    raw = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
-    return _parse_student_qa_response(raw)
+    response = call_llm(system_prompt=prompt, user_prompt=transcript, model_id=model_id)
+    return _parse_student_qa_response(response.content), response.usage
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +295,8 @@ if __name__ == "__main__":
         transcript = "This is a sample transcript for testing."
 
     try:
-        result = summary_agent(transcript=transcript)
+        result, usage = summary_agent(transcript=transcript)
         print("Summary:", result)
+        print("Usage:", usage)
     except Exception as e:
         print(f"Error: {e}")

@@ -3,6 +3,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rec2note_cli.core.llm import call_llm
+from rec2note_cli.core.llm_models import LLMResponse
+
+
+def _make_mock_response(content: str | None = '"hello"') -> MagicMock:
+    mock_usage = MagicMock()
+    mock_usage.prompt_tokens = 10
+    mock_usage.completion_tokens = 5
+    mock_usage.total_tokens = 15
+    mock_usage.prompt_tokens_details = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=MagicMock(content=content))]
+    mock_response.model = "gpt-4.1-mini"
+    mock_response.usage = mock_usage
+    return mock_response
 
 
 class TestCallLlm:
@@ -13,9 +27,9 @@ class TestCallLlm:
     @patch("rec2note_cli.core.llm._get_client")
     def test_builds_system_and_user_messages(self, mock_get_client: MagicMock):
         mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content='"hello"'))]
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create.return_value = _make_mock_response(
+            '"hello"'
+        )
         mock_get_client.return_value = mock_client
 
         call_llm(
@@ -37,11 +51,9 @@ class TestCallLlm:
     @patch("rec2note_cli.core.llm._get_client")
     def test_json_mode_adds_response_format(self, mock_get_client: MagicMock):
         mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(message=MagicMock(content='{"key": "value"}'))
-        ]
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create.return_value = _make_mock_response(
+            '{"key": "value"}'
+        )
         mock_get_client.return_value = mock_client
 
         call_llm(user_prompt="Return JSON.", json_mode=True)
@@ -52,8 +64,8 @@ class TestCallLlm:
     @patch("rec2note_cli.core.llm._get_client")
     def test_model_id_override_used(self, mock_get_client: MagicMock):
         mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content='"hello"'))]
+        mock_response = _make_mock_response('"hello"')
+        mock_response.model = "gpt-4o"
         mock_client.chat.completions.create.return_value = mock_response
         mock_get_client.return_value = mock_client
 
@@ -63,27 +75,51 @@ class TestCallLlm:
         assert call_kwargs["model"] == "gpt-4o"
 
     @patch("rec2note_cli.core.llm._get_client")
-    def test_returns_response_content(self, mock_get_client: MagicMock):
+    def test_returns_llm_response_object(self, mock_get_client: MagicMock):
         mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(message=MagicMock(content="The answer is 42"))
-        ]
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create.return_value = _make_mock_response(
+            "The answer is 42"
+        )
         mock_get_client.return_value = mock_client
 
         result = call_llm(user_prompt="What is 40 + 2?", json_mode=False)
 
-        assert result == "The answer is 42"
+        assert isinstance(result, LLMResponse)
+        assert result.content == "The answer is 42"
+        assert result.model == "gpt-4.1-mini"
 
     @patch("rec2note_cli.core.llm._get_client")
     def test_returns_empty_string_when_content_none(self, mock_get_client: MagicMock):
         mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=None))]
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create.return_value = _make_mock_response(None)
         mock_get_client.return_value = mock_client
 
         result = call_llm(user_prompt="Hello?", json_mode=False)
 
-        assert result == ""
+        assert isinstance(result, LLMResponse)
+        assert result.content == ""
+
+    @patch("rec2note_cli.core.llm._get_client")
+    def test_token_usage_populated(self, mock_get_client: MagicMock):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _make_mock_response('"ok"')
+        mock_get_client.return_value = mock_client
+
+        result = call_llm(user_prompt="Token test.", json_mode=False)
+
+        assert result.usage.prompt_tokens == 10
+        assert result.usage.completion_tokens == 5
+        assert result.usage.total_tokens == 15
+        assert result.usage.cached_tokens == 0
+
+    @patch("rec2note_cli.core.llm._get_client")
+    def test_cached_tokens_extracted(self, mock_get_client: MagicMock):
+        mock_client = MagicMock()
+        mock_response = _make_mock_response('"ok"')
+        mock_response.usage.prompt_tokens_details = MagicMock(cached_tokens=8)
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        result = call_llm(user_prompt="Cache test.", json_mode=False)
+
+        assert result.usage.cached_tokens == 8

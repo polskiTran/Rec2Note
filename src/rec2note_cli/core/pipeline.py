@@ -1,12 +1,7 @@
 import asyncio
+import time
 from collections.abc import Callable
 from functools import partial
-
-from rich.align import Align
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
-from rich.rule import Rule
 
 from rec2note_cli.config import get_settings
 from rec2note_cli.core.agents import (
@@ -15,218 +10,208 @@ from rec2note_cli.core.agents import (
     student_qa_agent,
     summary_agent,
 )
-from rec2note_cli.core.models import Deadline, LectureSummary, StudentQA, StudyQuestion
+from rec2note_cli.core.pipeline_models import AgentOutcome, PipelineResult
 from rec2note_cli.enums.agent_enums import AgentType
-from rec2note_cli.utils.markdown_builder import build_markdown
 from rec2note_cli.utils.read_file import read_file
 
 settings = get_settings()
 
-console = Console()
-
 _PANEL_WIDTH = 106
 
+# ---------------------------------------------------------------------------
+# Type alias for progress callbacks
+# ---------------------------------------------------------------------------
 
-async def _run_agent_with_semaphore(
+ProgressCallback = Callable[[AgentType, str, float], None]
+
+
+# ---------------------------------------------------------------------------
+# Async runner helpers
+# ---------------------------------------------------------------------------
+
+
+async def _run_agent_timed(
     semaphore: asyncio.Semaphore,
-    agent_func: Callable[
-        ..., LectureSummary | list[Deadline] | list[StudentQA] | list[StudyQuestion]
-    ],
+    agent_func: Callable,
     transcript: str,
-    model_id: str | None = None,
-) -> LectureSummary | list[Deadline] | list[StudentQA] | list[StudyQuestion]:
+    agent_type: AgentType,
+    model_id: str | None,
+    on_progress: ProgressCallback | None,
+) -> AgentOutcome:
+    """Run a single agent inside the semaphore and return its outcome.
+
+    Args:
+        semaphore: Concurrency limiter shared across all agents.
+        agent_func: The agent callable to execute.
+        transcript: Full lecture transcript text.
+        agent_type: Enum value identifying the agent.
+        model_id: Override model for this agent.
+        on_progress: Optional callback invoked with (agent_type, status, elapsed).
+
+    Returns:
+        An :class:`AgentOutcome` reflecting success or failure.
+    """
     async with semaphore:
+        if on_progress:
+            on_progress(agent_type, "running", 0.0)
+
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, partial(agent_func, transcript=transcript, model_id=model_id)
-        )
+        start = time.perf_counter()
+        try:
+            result, usage = await loop.run_in_executor(
+                None, partial(agent_func, transcript=transcript, model_id=model_id)
+            )
+            elapsed = time.perf_counter() - start
+            if on_progress:
+                on_progress(agent_type, "done", elapsed)
+            return AgentOutcome(
+                agent=agent_type,
+                success=True,
+                usage=usage,
+                elapsed_seconds=elapsed,
+            ), result
+        except Exception as exc:
+            elapsed = time.perf_counter() - start
+            if on_progress:
+                on_progress(agent_type, "failed", elapsed)
+            return AgentOutcome(
+                agent=agent_type,
+                success=False,
+                error=str(exc),
+                elapsed_seconds=elapsed,
+            ), None
 
 
-def run_minimal_pipeline(note_name: str, transcription_path: str) -> str:
-    """
-    Run minimal pipeline - only run summary agent.
+# ---------------------------------------------------------------------------
+# Public pipeline functions
+# ---------------------------------------------------------------------------
+
+
+def run_minimal_pipeline(
+    note_name: str,
+    transcription_path: str,
+    on_progress: ProgressCallback | None = None,
+) -> PipelineResult:
+    """Run the minimal pipeline — summary agent only.
 
     Args:
-        note_name: Name of the note to be created.
-        transcription_path: Path to the transcription file.
+        note_name: Display name for the note being created.
+        transcription_path: Path to the plain-text transcript file.
+        on_progress: Optional callback ``(agent_type, status, elapsed)`` invoked
+            on agent state transitions (``"running"``, ``"done"``, ``"failed"``).
 
     Returns:
-        Markdown content of the note.
+        A :class:`PipelineResult`. ``summary`` is None if the agent failed.
 
     Raises:
-        ValueError: If the transcription file is empty.
+        ValueError: If the transcript file is empty.
     """
-    console.print(Rule("[bold blue]Rec2Note[/bold blue] [dim]— Minimal Pipeline[/dim]"))
-    console.print()
-    job_panel = Panel(
-        f"[bold]Note:[/bold]       [cyan]{note_name}[/cyan]\n"
-        f"[bold]Transcript:[/bold] [dim]{transcription_path}[/dim]",
-        title="[bold blue]Job Details[/bold blue]",
-        border_style="blue",
-        width=_PANEL_WIDTH,
-        padding=(1, 2),
-    )
-    console.print(Align.center(job_panel))
-
-    console.print("\n[bold cyan]📄 Reading transcript...[/bold cyan]")
     transcript = read_file(transcription_path)
     if not transcript.strip():
         raise ValueError("Transcription file is empty.")
-    console.print(
-        f"[green]✓[/green] Transcript loaded "
-        f"[dim]({len(transcript):,} characters)[/dim]"
-    )
 
-    console.print()
-    with console.status("[yellow]🤖 Running summary agent...[/yellow]", spinner="dots"):
-        summary = summary_agent(
-            transcript=transcript,
-            model_id=settings.agent_model_id[AgentType.SUMMARY],
+    pipeline_start = time.perf_counter()
+
+    async def _run() -> PipelineResult:
+        semaphore = asyncio.Semaphore(1)
+        outcome, summary = await _run_agent_timed(
+            semaphore,
+            summary_agent,
+            transcript,
+            AgentType.SUMMARY,
+            settings.agent_model_id[AgentType.SUMMARY],
+            on_progress,
         )
-    console.print("[green]✓[/green] [bold]Summary[/bold] complete.")
+        return PipelineResult(
+            summary=summary,
+            outcomes=[outcome],
+            total_elapsed_seconds=time.perf_counter() - pipeline_start,
+        )
 
-    console.print()
-    console.print(
-        Rule("[bold green]✓ Minimal pipeline complete[/bold green]", style="green")
-    )
-
-    return build_markdown(note_name, summary)
+    return asyncio.run(_run())
 
 
-def run_full_pipeline(note_name: str, transcription_path: str) -> str:
-    """
-    Run full pipeline - summary + student QA + deadline + study Qs.
+def run_full_pipeline(
+    note_name: str,
+    transcription_path: str,
+    on_progress: ProgressCallback | None = None,
+) -> PipelineResult:
+    """Run the full pipeline — summary, deadlines, study questions, student Q&A.
+
+    All four agents run concurrently. A failed agent does not abort the pipeline;
+    its slot in :class:`PipelineResult` will hold the default (None / empty list)
+    and the corresponding :class:`AgentOutcome` will have ``success=False``.
 
     Args:
-        note_name: Name of the note to be created.
-        transcription_path: Path to the transcription file.
+        note_name: Display name for the note being created.
+        transcription_path: Path to the plain-text transcript file.
+        on_progress: Optional callback ``(agent_type, status, elapsed)`` invoked
+            on agent state transitions.
 
     Returns:
-        Markdown content of the note.
+        A :class:`PipelineResult` with whatever agents succeeded.
 
     Raises:
-        ValueError: If the transcription file is empty.
+        ValueError: If the transcript file is empty.
     """
-    console.print(Rule("[bold blue]Rec2Note[/bold blue] [dim]— Full Pipeline[/dim]"))
-    console.print()
-    job_panel = Panel(
-        f"[bold]Note:[/bold]       [cyan]{note_name}[/cyan]\n"
-        f"[bold]Transcript:[/bold] [dim]{transcription_path}[/dim]\n"
-        f"[bold]Agents:[/bold]     summary, deadlines, study questions, student Q&A",
-        title="[bold blue]Job Details[/bold blue]",
-        border_style="blue",
-        width=_PANEL_WIDTH,
-        padding=(1, 2),
-    )
-    console.print(Align.center(job_panel))
-
-    console.print("\n[bold cyan]📄 Reading transcript...[/bold cyan]")
     transcript = read_file(transcription_path)
     if not transcript.strip():
         raise ValueError("Transcription file is empty.")
-    console.print(
-        f"[green]✓[/green] Transcript loaded "
-        f"[dim]({len(transcript):,} characters)[/dim]"
-    )
 
-    async def run_agents_with_progress(progress: Progress, tasks: dict):
+    pipeline_start = time.perf_counter()
+
+    async def _run() -> PipelineResult:
         semaphore = asyncio.Semaphore(3)
 
-        async def run_and_update(agent_func, task_key, agent_name, model_id=None):
-            progress.update(
-                tasks[task_key], description=f"[yellow]⏳ {agent_name}", completed=0
-            )
-            try:
-                result = await _run_agent_with_semaphore(
-                    semaphore, agent_func, transcript, model_id
-                )
-                progress.update(
-                    tasks[task_key],
-                    completed=1,
-                    description=f"[green]✓ {agent_name}",
-                )
-                return result
-            except Exception:
-                progress.update(
-                    tasks[task_key],
-                    description=f"[red]✗ {agent_name} failed",
-                )
-                raise
-
-        results = await asyncio.gather(
-            run_and_update(
+        tasks = await asyncio.gather(
+            _run_agent_timed(
+                semaphore,
                 summary_agent,
-                "summary",
-                "Summary",
-                model_id=settings.agent_model_id[AgentType.SUMMARY],
+                transcript,
+                AgentType.SUMMARY,
+                settings.agent_model_id[AgentType.SUMMARY],
+                on_progress,
             ),
-            run_and_update(
+            _run_agent_timed(
+                semaphore,
                 deadline_agent,
-                "deadlines",
-                "Deadlines",
-                model_id=settings.agent_model_id[AgentType.DEADLINE],
+                transcript,
+                AgentType.DEADLINE,
+                settings.agent_model_id[AgentType.DEADLINE],
+                on_progress,
             ),
-            run_and_update(
+            _run_agent_timed(
+                semaphore,
                 questions_agent,
-                "questions",
-                "Study Questions",
-                model_id=settings.agent_model_id[AgentType.QUESTIONS],
+                transcript,
+                AgentType.QUESTIONS,
+                settings.agent_model_id[AgentType.QUESTIONS],
+                on_progress,
             ),
-            run_and_update(
+            _run_agent_timed(
+                semaphore,
                 student_qa_agent,
-                "student_qa",
-                "Student Q&A",
-                model_id=settings.agent_model_id[AgentType.STUDENT_QA],
+                transcript,
+                AgentType.STUDENT_QA,
+                settings.agent_model_id[AgentType.STUDENT_QA],
+                on_progress,
             ),
-            return_exceptions=True,
         )
 
-        agent_names = ["Summary", "Deadlines", "Study Questions", "Student Q&A"]
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                raise RuntimeError(f"{agent_names[i]} failed: {result}")
+        (
+            (outcome_summary, summary),
+            (outcome_dl, deadlines),
+            (outcome_sq, study_qs),
+            (outcome_qa, student_qa),
+        ) = tasks
 
-        summary: LectureSummary = results[0]
-        deadlines: list[Deadline] = results[1]
-        study_questions: list[StudyQuestion] = results[2]
-        student_qa: list[StudentQA] = results[3]
-
-        return summary, deadlines, study_questions, student_qa
-
-    console.print()
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold]{task.description}"),
-        BarColumn(),
-        console=console,
-    ) as progress:
-        tasks = {
-            "summary": progress.add_task("[cyan]Summary Agent", total=1),
-            "deadlines": progress.add_task("[cyan]Deadline Agent", total=1),
-            "questions": progress.add_task("[cyan]Study Questions Agent", total=1),
-            "student_qa": progress.add_task("[cyan]Student Q&A Agent", total=1),
-        }
-
-        summary, deadlines, study_questions, student_qa = asyncio.run(
-            run_agents_with_progress(progress, tasks)
+        return PipelineResult(
+            summary=summary,
+            deadlines=deadlines or [],
+            study_questions=study_qs or [],
+            student_qa=student_qa or [],
+            outcomes=[outcome_summary, outcome_dl, outcome_sq, outcome_qa],
+            total_elapsed_seconds=time.perf_counter() - pipeline_start,
         )
 
-    console.print("[green]✓[/green] All agents complete.")
-
-    console.print()
-    result_panel = Panel(
-        f"[green]✓[/green] Summary\n"
-        f"[green]✓[/green] {len(deadlines)} deadline(s) found\n"
-        f"[green]✓[/green] {len(study_questions)} study question(s) generated\n"
-        f"[green]✓[/green] {len(student_qa)} student Q&A pair(s) extracted",
-        title="[bold green]Results[/bold green]",
-        border_style="green",
-        width=_PANEL_WIDTH,
-    )
-    console.print(Align.center(result_panel))
-    console.print(
-        Rule("[bold green]✓ Full pipeline complete[/bold green]", style="green")
-    )
-
-    return build_markdown(note_name, summary, student_qa, deadlines, study_questions)
+    return asyncio.run(_run())

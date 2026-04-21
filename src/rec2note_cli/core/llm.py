@@ -5,6 +5,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from rec2note_cli.config import get_settings
+from rec2note_cli.core.llm_models import LLMResponse, TokenUsage
 
 settings = get_settings()
 
@@ -29,9 +30,8 @@ def call_llm(
     temperature: float | None = None,
     max_tokens: int | None = None,
     json_mode: bool = True,
-) -> str:
-    """
-    Call an OpenAI-compatible LLM and return the response text.
+) -> LLMResponse:
+    """Call an OpenAI-compatible LLM and return the response envelope.
 
     Args:
         system_prompt: Optional system instruction.
@@ -43,7 +43,8 @@ def call_llm(
                    response_format. Set to False for plain text responses.
 
     Returns:
-        The model's response text as a plain string.
+        An :class:`LLMResponse` containing the reply text, resolved model
+        identifier, and token usage statistics.
 
     Raises:
         ValueError: If no user_prompt is provided.
@@ -64,11 +65,24 @@ def call_llm(
         temperature=temperature
         if temperature is not None
         else settings.llm_temperature,
-        # max_tokens=max_tokens or settings.llm_max_tokens,
         response_format={"type": "json_object"} if json_mode else {"type": "text"},
     )
 
-    return response.choices[0].message.content or ""
+    usage = response.usage
+    cached = 0
+    if usage and usage.prompt_tokens_details:
+        cached = usage.prompt_tokens_details.cached_tokens or 0
+
+    return LLMResponse(
+        content=response.choices[0].message.content or "",
+        model=response.model,
+        usage=TokenUsage(
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
+            total_tokens=usage.total_tokens if usage else 0,
+            cached_tokens=cached,
+        ),
+    )
 
 
 if __name__ == "__main__":
@@ -77,4 +91,4 @@ if __name__ == "__main__":
         user_prompt="Say hello in exactly three words.",
         json_mode=False,
     )
-    print(result)
+    print(result.content)
